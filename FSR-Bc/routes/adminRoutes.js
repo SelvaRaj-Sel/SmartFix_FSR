@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import User from "../models/User.js";
 import Notification from "../models/Notification.js";
+import FSRSequence from "../models/FSRSequence.js";
 
 const router = Router();
 
@@ -41,6 +42,7 @@ function publicUser(user) {
   return {
     id: user.id,
     name: user.name,
+    employeeid: user.employeeid,
     email: user.email,
     phone: user.phone,
     role: user.role,
@@ -65,6 +67,7 @@ router.get("/users", async (req, res) => {
 router.post("/users", async (req, res) => {
   try {
     const name = String(req.body.name || "").trim();
+    const employeeid = String(req.body.employeeid || "").trim();
     const email = String(req.body.email || "").trim().toLowerCase();
     const password = String(req.body.password || "");
 
@@ -80,6 +83,7 @@ router.post("/users", async (req, res) => {
 
     const user = await User.create({
       name,
+      employeeid,
       email,
       passwordHash: await bcrypt.hash(password, 12),
       role: "user",
@@ -305,6 +309,97 @@ router.patch("/notifications/:id/read", async (req, res) => {
     res.status(500).json({
       message: "Could not update notification",
     });
+  }
+});
+
+// Admin reset any user's password
+router.patch("/users/:id/reset-password", async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: "Invalid user ID" });
+    }
+
+    const { newPassword } = req.body;
+    if (!newPassword || String(newPassword).length < 8) {
+      return res.status(400).json({
+        message: "Password must be at least 8 characters long",
+      });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.passwordHash = await bcrypt.hash(newPassword, 12);
+    await user.save();
+
+    res.json({ success: true, message: `Password reset successfully for ${user.email}` });
+  } catch (error) {
+    console.error("Admin reset password error:", error);
+    res.status(500).json({ message: "Could not reset password" });
+  }
+});
+
+// Admin get FSR annual numbering config
+router.get("/fsr-config", async (req, res) => {
+  try {
+    const currentYear = new Date().getFullYear();
+    let config = await FSRSequence.findOne({ year: currentYear });
+    if (!config) {
+      config = await FSRSequence.create({
+        year: currentYear,
+        prefix: "FSR",
+        currentNumber: 0,
+        digits: 3,
+      });
+    }
+
+    const allConfigs = await FSRSequence.find().sort({ year: -1 });
+
+    res.json({
+      currentYearConfig: config,
+      allConfigs,
+    });
+  } catch (error) {
+    console.error("Error fetching FSR config:", error);
+    res.status(500).json({ message: "Could not load FSR numbering config" });
+  }
+});
+
+// Admin configure FSR numbering for a year (annual setup)
+router.post("/fsr-config", async (req, res) => {
+  try {
+    const { year, prefix, currentNumber, digits } = req.body;
+
+    const targetYear = Number(year || new Date().getFullYear());
+    const seqPrefix = String(prefix || "FSR").trim().toUpperCase();
+    const startingNum = Number(currentNumber ?? 0);
+    const numDigits = Number(digits || 3);
+
+    let config = await FSRSequence.findOne({ year: targetYear });
+    if (config) {
+      config.prefix = seqPrefix;
+      config.currentNumber = startingNum;
+      config.digits = numDigits;
+      await config.save();
+    } else {
+      config = await FSRSequence.create({
+        year: targetYear,
+        prefix: seqPrefix,
+        currentNumber: startingNum,
+        digits: numDigits,
+      });
+    }
+
+    res.json({
+      success: true,
+      config,
+      message: `FSR numbering configured for year ${targetYear}: ${seqPrefix}${targetYear}-${String(startingNum + 1).padStart(numDigits, "0")}`,
+    });
+  } catch (error) {
+    console.error("Error setting FSR config:", error);
+    res.status(500).json({ message: "Could not configure FSR numbering" });
   }
 });
 

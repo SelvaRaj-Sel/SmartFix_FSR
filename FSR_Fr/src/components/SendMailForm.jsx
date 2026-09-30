@@ -16,9 +16,16 @@ const splitAddresses = (value) =>
  * Standalone mail UI. Provide onSend(formData) to connect your backend.
  * Backend fields: to, cc, bcc (JSON arrays), subject, message, attachments (files).
  */
-export default function SendMailForm({ onSend }) {
-  const [values, setValues] = useState(initialValues);
-  const [attachments, setAttachments] = useState([]);
+export default function SendMailForm({ onSend, initialValues: propInitialValues, initialAttachments = [] }) {
+  const defaultValues = {
+    to: propInitialValues?.to || "",
+    cc: propInitialValues?.cc || "",
+    bcc: propInitialValues?.bcc || "",
+    subject: propInitialValues?.subject || "",
+    message: propInitialValues?.message || "",
+  };
+  const [values, setValues] = useState(defaultValues);
+  const [attachments, setAttachments] = useState(initialAttachments || []);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");

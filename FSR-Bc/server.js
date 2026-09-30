@@ -1,24 +1,33 @@
-﻿import "dotenv/config";
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import User from "./models/User.js";
+import path from "path";
 import authRoutes from "./routes/authRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
+import companyRoutes from "./routes/companyRoutes.js";
+import fsrRoutes from "./routes/fsrRoutes.js";
+import sendMailRoutes from "./routes/SendMailRoutes.js";
 
 const app = express();
-const PORT = Number(process.env.PORT || 5000)
+const PORT = Number(process.env.PORT || 5000);
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL,
+  origin: process.env.FRONTEND_URL || "*",
 }));
 
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/companies", companyRoutes);
+app.use("/api/reports", fsrRoutes);
+app.use("/api/mail", sendMailRoutes);
 
 async function startServer() {
   if (!process.env.MONGO_URI || !process.env.JWT_SECRET) {

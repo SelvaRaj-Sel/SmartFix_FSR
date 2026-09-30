@@ -113,6 +113,7 @@ router.post("/login", async (req, res) => {
       userType: user.role === "admin" ? "admin" : "existing",
       user: {
         id: user.id,
+        name: user.name,
         email: user.email,
         role: user.role,
       },
@@ -120,6 +121,42 @@ router.post("/login", async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: "Login failed" });
+  }
+});
+
+router.patch("/change-password", async (req, res) => {
+  try {
+    const token = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
+    if (!token) {
+      return res.status(401).json({ message: "Please sign in again" });
+    }
+
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword || newPassword.length < 8) {
+      return res.status(400).json({
+        message: "Provide current password and new password of at least 8 characters",
+      });
+    }
+
+    const user = await User.findById(payload.userId).select("+passwordHash");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const validCurrent = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!validCurrent) {
+      return res.status(400).json({ message: "Current password is incorrect" });
+    }
+
+    user.passwordHash = await bcrypt.hash(newPassword, 12);
+    await user.save();
+
+    return res.json({ success: true, message: "Password updated successfully" });
+  } catch (error) {
+    console.error("Change password error:", error);
+    return res.status(500).json({ message: "Could not change password" });
   }
 });
 
