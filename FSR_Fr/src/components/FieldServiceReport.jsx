@@ -811,6 +811,9 @@ function SignaturePad({ label, value, onChange }) {
 const FsrPdfPage = forwardRef(function FsrPdfPage(
   { form, fsrNo, icon, customerSignature, engineerSignature }, ref
 ) {
+  const measureRef = useRef(null);
+  const measureTableRef = useRef(null);
+  const [useTwoPages, setUseTwoPages] = useState(false);
   const cell = "border border-[#8b8b8b] px-[7px] py-[6px] items-center [overflow-wrap:anywhere]";
   const label = "font-normal text-[#444]";
   const value = (text) => text === null || text === undefined || text === "" ? "—" : text;
@@ -844,82 +847,124 @@ const FsrPdfPage = forwardRef(function FsrPdfPage(
     </div>
   );
 
-  return (
-    <div ref={ref} className="box-border w-[210mm] min-h-[297mm] bg-white p-[10mm] text-[11px] leading-[1.45] text-[#333] [font-family:Arial,sans-serif]">
-      <table className="w-full table-fixed border-collapse text-[11px] leading-[1.45]">
-        <colgroup>{Array.from({ length: 12 }, (_, index) => <col key={index} className="w-[8.333333333333334%]" />)}</colgroup>
-        <tbody>
-          <tr className="h-4"><td colSpan={12} className={`${cell} text-center text-[11px] font-semibold`}>FIELD SERVICE REPORT</td></tr>
-          <tr>
-            <td colSpan={6} rowSpan={4} className={`${cell} align-middle`}>
-              <div className="flex items-center gap-[10px]">
-                <div className="w-[40mm] shrink-0"><img src={icon} alt="Smartfix Automation" className="block max-h-[48px] w-full object-contain" /></div>
-                <div className="text-[11px] leading-[1.5]">
-                  <strong className="text-[11px] font-semibold">SMARTFIX AUTOMATION</strong>
-                  <div>No. 5/12, Chetty Street, Poonamallee,<br />Chennai, Tamil Nadu - 600056<br />Mail: csm@smartfixautomation.com<br />+91 9894571542</div>
-                </div>
-              </div>
-            </td>
-            <td colSpan={3} className={cell}>{detail("FSR No", fsrNo)}</td>
-            <td colSpan={3} className={cell}>{detail("Date", form.date)}</td>
-          </tr>
-          <tr><td colSpan={6} className={cell}>{detail("Ref.No", form.refNo)}</td></tr>
-          <tr><td colSpan={3} className={cell}>{detail("Start Date", form.startDate)}</td><td colSpan={3} className={cell}>{detail("End Date", form.endDate)}</td></tr>
-          <tr><td colSpan={6} className={cell}><div className="mb-[3px] font-semibold">VISIT TYPE:</div><div className="grid grid-cols-2 items-start justify-self-start gap-x-[8px] gap-y-[4px]">{option(form.visitType === "chargeable", "CHARGEABLE")}{option(form.visitType === "non-chargeable", "NON CHARGEABLE")}</div></td></tr>
-          <tr>
-            <td colSpan={7} className={cell}>
-              <span className="font-semibold">CUSTOMER DETAILS: </span><span>{value(form.customerName)}</span>
-              <div>{value(form.customerAddress)}</div>
-              <div className="mt-[3px]">{detail("LOCATION", form.locationName)}</div>
-            </td>
-            <td colSpan={5} rowSpan={2} className={cell}>
-              <div className="mb-[3px] font-semibold">CATEGORY:</div>
-              <div className="grid grid-cols-2 items-center gap-x-[10px] gap-y-[6px]">
-                {[["service", "SERVICE"], ["emc", "EMC"], ["project", "PROJECT"], ["warranty", "WARRANTY"], ["demo-training", "DEMO/TRAINING"], ["system-study", "SYSTEM STUDY"]].map(([key, title]) => <span key={key}>{option(form.category === key, title)}</span>)}
-              </div>
-            </td>
-          </tr>
-          <tr><td colSpan={7} className={cell}><div>{detail("Contact Person Name", form.contactPerson)}</div><div>{detail("Mobile", form.mobile)}<span className="ml-[12px]">{detail("EMAIL", form.customerEmail)}</span></div></td></tr>
-          {workRow("Customer Issue:", form.customerIssue, "min-h-[22mm]")}
-          {workRow("Action:", form.action, "min-h-[50mm]")}
-          <tr><td colSpan={12} className={cell}><div className="grid grid-cols-[20mm_repeat(3,minmax(0,1fr))] items-center justify-items-start gap-x-[2px] gap-y-[2px]"><span>Call Status:</span>{option(form.callStatus === "completed", "Completed")}{option(form.callStatus === "pending", "Pending")}{option(form.callStatus === "spare-required", "Spare Required")}</div></td></tr>
-          <tr><td colSpan={12} className={cell}>{detail("Spare Details", form.spareDetails)}</td></tr>
-          <tr>
-            <td colSpan={12} className={cell}>
-              <div className="grid grid-cols-[28mm_repeat(3,minmax(0,1fr))] items-center justify-items-start gap-x-[10px]">
-                <span>Customer Feedback:</span>
-                {["Extremely Satisfied", "Satisfied", "Dissatisfied"].map((title) => (
-                  <span key={title}>{option(form.customerFeedback === title, title)}</span>
-                ))}
-              </div>
-            </td>
-          </tr>
-          <tr>
-            <td colSpan={12} className={`${cell} !p-0`}>
-              <table className="w-full table-fixed border-collapse text-[9px] leading-[1.45]">
-                <colgroup><col className="w-[19mm]" />{Array.from({ length: 6 }, (_, i) => <col key={i} />)}</colgroup>
-                <tbody>
-                  <tr>
-                    <td rowSpan={2} className="border-r border-[#8b8b8b] px-[6px] py-[6px] align-middle text-center">Billing Details</td>
-                    {["No. of Persons", "Total No. of Working Days", "Over Time (Hrs)", "Extra MAN Days (Over Time)", "Total No. of MAN Days", "Total No. of Payable Days"].map((title, i) => (
-                      <td key={title} className={`border-b border-[#8b8b8b] px-[6px] py-[6px] align-middle [overflow-wrap:anywhere] ${i < 5 ? "border-r" : ""}`}>{title}</td>
-                    ))}
-                  </tr>
-                  <tr>
-                    {[form.noOfPersons, form.workingDays, form.overtimeHours, form.extraManDays, form.totalManDays, form.payableDays].map((text, i) => (
-                      <td key={i} className={`h-[8mm] border-[#8b8b8b] px-[6px] py-[6px] align-middle [overflow-wrap:anywhere] ${i < 5 ? "border-r" : ""}`}>{value(text)}</td>
-                    ))}
-                  </tr>
-                </tbody>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td colSpan={6} className={`${cell} !p-0`}><div className="px-[7px] pt-[6px] pb-[3px] underline">Customer Remarks:</div><div className={`${ruled} flex min-h-[22mm] items-center px-[7px] py-[6px] text-left [overflow-wrap:anywhere]`}>{value(form.customerRemarks)}</div><div className="px-[7px] pt-[5px] pb-[6px]">{signature(form.customerSignName, form.customerSignDate, customerSignature, true)}</div></td>
-            <td colSpan={6} className={`${cell} !p-0`}><div className="px-[7px] pt-[6px] pb-[3px] underline">Engineer&apos;s Remarks:</div><div className={`${ruled} flex min-h-[22mm] items-center px-[7px] py-[6px] text-left [overflow-wrap:anywhere]`}>{value(form.engineerRemarks)}</div><div className="px-[7px] pt-[5px] pb-[6px]">{signature(form.engineerName, form.engineerSignDate, engineerSignature, false)}</div></td>
-          </tr>
-        </tbody>
+  useLayoutEffect(() => {
+    const measurement = measureRef.current;
+    const table = measureTableRef.current;
+    if (!measurement || !table) return;
+
+    // Keep the normal report on one fixed A4 page. Only move the billing
+    // section when the complete table genuinely crosses the printable area.
+    const measurementStyle = window.getComputedStyle(measurement);
+    const printableHeight = measurement.clientHeight
+      - parseFloat(measurementStyle.paddingTop)
+      - parseFloat(measurementStyle.paddingBottom);
+    const contentHeight = table.getBoundingClientRect().height;
+    setUseTwoPages(contentHeight > printableHeight + 1);
+  }, [form, fsrNo, customerSignature, engineerSignature]);
+
+  const columns = () => (
+    <colgroup>{Array.from({ length: 12 }, (_, index) => <col key={index} className="w-[8.333333333333334%]" />)}</colgroup>
+  );
+
+  const headerRows = () => (
+    <>
+      <tr className="h-4"><td colSpan={12} className={`${cell} text-center text-[11px] font-semibold`}>FIELD SERVICE REPORT</td></tr>
+      <tr>
+        <td colSpan={6} rowSpan={4} className={`${cell} align-middle`}>
+          <div className="flex items-center gap-[10px]">
+            <div className="w-[40mm] shrink-0"><img src={icon} alt="Smartfix Automation" className="block max-h-[48px] w-full object-contain" /></div>
+            <div className="text-[11px] leading-[1.5]">
+              <strong className="text-[11px] font-semibold">SMARTFIX AUTOMATION</strong>
+              <div>No. 5/12, Chetty Street, Poonamallee,<br />Chennai, Tamil Nadu - 600056<br />Mail: csm@smartfixautomation.com<br />+91 9894571542</div>
+            </div>
+          </div>
+        </td>
+        <td colSpan={3} className={cell}>{detail("FSR No", fsrNo)}</td>
+        <td colSpan={3} className={cell}>{detail("Date", form.date)}</td>
+      </tr>
+      <tr><td colSpan={6} className={cell}>{detail("Ref.No", form.refNo)}</td></tr>
+      <tr><td colSpan={3} className={cell}>{detail("Start Date", form.startDate)}</td><td colSpan={3} className={cell}>{detail("End Date", form.endDate)}</td></tr>
+      <tr><td colSpan={6} className={cell}><div className="mb-[3px] font-semibold">VISIT TYPE:</div><div className="grid grid-cols-2 items-start justify-self-start gap-x-[8px] gap-y-[4px]">{option(form.visitType === "chargeable", "CHARGEABLE")}{option(form.visitType === "non-chargeable", "NON CHARGEABLE")}</div></td></tr>
+    </>
+  );
+
+  const serviceRows = () => (
+    <>
+      <tr>
+        <td colSpan={7} className={cell}>
+          <span className="font-semibold">CUSTOMER DETAILS: </span><span>{value(form.customerName)}</span>
+          <div>{value(form.customerAddress)}</div>
+          <div className="mt-[3px]">{detail("LOCATION", form.locationName)}</div>
+        </td>
+        <td colSpan={5} rowSpan={2} className={cell}>
+          <div className="mb-[3px] font-semibold">CATEGORY:</div>
+          <div className="grid grid-cols-2 items-center gap-x-[10px] gap-y-[6px]">
+            {[["service", "SERVICE"], ["emc", "EMC"], ["project", "PROJECT"], ["warranty", "WARRANTY"], ["demo-training", "DEMO/TRAINING"], ["system-study", "SYSTEM STUDY"]].map(([key, title]) => <span key={key}>{option(form.category === key, title)}</span>)}
+          </div>
+        </td>
+      </tr>
+      <tr><td colSpan={7} className={cell}><div>{detail("Contact Person Name", form.contactPerson)}</div><div>{detail("Mobile", form.mobile)}<span className="ml-[12px]">{detail("EMAIL", form.customerEmail)}</span></div></td></tr>
+      {workRow("Customer Issue:", form.customerIssue, "min-h-[22mm]")}
+      {workRow("Action:", form.action, "min-h-[50mm]")}
+      <tr><td colSpan={12} className={cell}><div className="grid grid-cols-[20mm_repeat(3,minmax(0,1fr))] items-center justify-items-start gap-x-[2px] gap-y-[2px]"><span>Call Status:</span>{option(form.callStatus === "completed", "Completed")}{option(form.callStatus === "pending", "Pending")}{option(form.callStatus === "spare-required", "Spare Required")}</div></td></tr>
+      <tr><td colSpan={12} className={cell}>{detail("Spare Details", form.spareDetails)}</td></tr>
+      <tr>
+        <td colSpan={12} className={cell}>
+          <div className="grid grid-cols-[28mm_repeat(3,minmax(0,1fr))] items-center justify-items-start gap-x-[10px]">
+            <span>Customer Feedback:</span>
+            {["Extremely Satisfied", "Satisfied", "Dissatisfied"].map((title) => <span key={title}>{option(form.customerFeedback === title, title)}</span>)}
+          </div>
+        </td>
+      </tr>
+    </>
+  );
+
+  const billingRows = () => (
+    <>
+      <tr>
+        <td colSpan={12} className={`${cell} !p-0`}>
+          <table className="w-full table-fixed border-collapse text-[9px] leading-[1.45]">
+            <colgroup><col className="w-[19mm]" />{Array.from({ length: 6 }, (_, i) => <col key={i} />)}</colgroup>
+            <tbody>
+              <tr>
+                <td rowSpan={2} className="border-r border-[#8b8b8b] px-[6px] py-[6px] align-middle text-center">Billing Details</td>
+                {["No. of Persons", "Total No. of Working Days", "Over Time (Hrs)", "Extra MAN Days (Over Time)", "Total No. of MAN Days", "Total No. of Payable Days"].map((title, i) => <td key={title} className={`border-b border-[#8b8b8b] px-[6px] py-[6px] align-middle [overflow-wrap:anywhere] ${i < 5 ? "border-r" : ""}`}>{title}</td>)}
+              </tr>
+              <tr>
+                {[form.noOfPersons, form.workingDays, form.overtimeHours, form.extraManDays, form.totalManDays, form.payableDays].map((text, i) => <td key={i} className={`h-[8mm] border-[#8b8b8b] px-[6px] py-[6px] align-middle [overflow-wrap:anywhere] ${i < 5 ? "border-r" : ""}`}>{value(text)}</td>)}
+              </tr>
+            </tbody>
+          </table>
+        </td>
+      </tr>
+      <tr>
+        <td colSpan={6} className={`${cell} !p-0`}><div className="px-[7px] pt-[6px] pb-[3px] underline">Customer Remarks:</div><div className={`${ruled} flex min-h-[22mm] items-center px-[7px] py-[6px] text-left [overflow-wrap:anywhere]`}>{value(form.customerRemarks)}</div><div className="px-[7px] pt-[5px] pb-[6px]">{signature(form.customerSignName, form.customerSignDate, customerSignature, true)}</div></td>
+        <td colSpan={6} className={`${cell} !p-0`}><div className="px-[7px] pt-[6px] pb-[3px] underline">Engineer&apos;s Remarks:</div><div className={`${ruled} flex min-h-[22mm] items-center px-[7px] py-[6px] text-left [overflow-wrap:anywhere]`}>{value(form.engineerRemarks)}</div><div className="px-[7px] pt-[5px] pb-[6px]">{signature(form.engineerName, form.engineerSignDate, engineerSignature, false)}</div></td>
+      </tr>
+    </>
+  );
+
+  const page = (rows, key) => (
+    <div key={key} data-pdf-page className="box-border h-[297mm] w-[210mm] shrink-0 overflow-hidden bg-white p-[10mm] text-[11px] leading-[1.45] text-[#333] [font-family:Arial,sans-serif]">
+      <table className={`w-full table-fixed border-collapse text-[11px] leading-[1.45] ${key !== "billing" ? "h-full" : ""}`}>
+        {columns()}
+        <tbody>{rows}</tbody>
       </table>
+    </div>
+  );
+
+  return (
+    <div ref={ref} className="relative w-[210mm]">
+      {useTwoPages
+        ? <>{page(<>{headerRows()}{serviceRows()}</>, "service")}{page(<>{headerRows()}{billingRows()}</>, "billing")}</>
+        : page(<>{headerRows()}{serviceRows()}{billingRows()}</>, "single")}
+
+      <div ref={measureRef} aria-hidden="true" className="invisible absolute left-0 top-0 box-border h-[297mm] w-[210mm] overflow-hidden bg-white p-[10mm] text-[11px] leading-[1.45] [font-family:Arial,sans-serif]">
+        <table ref={measureTableRef} className="h-full w-full table-fixed border-collapse text-[11px] leading-[1.45]">
+          {columns()}
+          <tbody>{headerRows()}{serviceRows()}{billingRows()}</tbody>
+        </table>
+      </div>
     </div>
   );
 });
