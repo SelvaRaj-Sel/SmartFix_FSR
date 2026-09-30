@@ -9,7 +9,7 @@ export default function SendMailPage() {
   const navigate = useNavigate();
 
   const reportState = location.state || {};
-  const { to = "", subject = "", message = "" } = reportState;
+  const { to = "", cc = "", subject = "",  message = "" } = reportState;
 
   async function handleSendEmail(formData) {
     const token = localStorage.getItem("smartfix_auth_token");
@@ -46,7 +46,7 @@ export default function SendMailPage() {
           onSend={handleSendEmail}
           initialValues={{
             to: to || "",
-            cc: "",
+            cc: cc || "",
             bcc: "",
             subject: subject || "Field Service Report Summary",
             message: message || "Please find attached field service report details.",

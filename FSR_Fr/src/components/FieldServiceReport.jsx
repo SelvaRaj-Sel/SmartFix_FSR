@@ -14,6 +14,7 @@ export default function FieldServiceReport({ onSubmitReport }) {
   const currentUser = JSON.parse(localStorage.getItem("smartfix_user") || "null");
   console.log(currentUser)
   const defaultEngineerName = currentUser?.name || currentUser?.username || currentUser?.email || "";
+  const defaultEngineerEmail = currentUser?.email || "";
   const defaultEngineerId = currentUser?.employeeid;
   const pdfPageRef = useRef(null);
 
@@ -234,6 +235,8 @@ export default function FieldServiceReport({ onSubmitReport }) {
       const res = await onSubmitReport({
         ...form,
         engineerName: activeEngineerName,
+        customerSignDate: form.date,
+        engineerSignDate: form.date,
         customerSignature,
         engineerSignature,
       });
@@ -255,9 +258,9 @@ export default function FieldServiceReport({ onSubmitReport }) {
       const pageHeight = 297;
 
       for (let page = 0; page < pages.length; page++) {
-        const canvas = await html2canvas(pages[page], { scale: 2, useCORS: true, backgroundColor: "#fff" });
+        const canvas = await html2canvas(pages[page], { scale: 1.5, useCORS: true, backgroundColor: "#fff" });
         if (page) pdf.addPage();
-        pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, pageWidth, pageHeight);
+        pdf.addImage(canvas.toDataURL("image/jpeg", 0.86), "JPEG", 0, 0, pageWidth, pageHeight, undefined, "FAST");
         pdf.setFontSize(8);
         pdf.text(`Page ${page + 1} of ${pages.length}`, 198, 293, { align: "right" });
       }
@@ -280,6 +283,20 @@ export default function FieldServiceReport({ onSubmitReport }) {
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
       setMessage(`Field Service Report ${assignedFsrNo} saved. PDF downloaded.`);
+
+      const continueToMail = window.confirm(
+        `Field Service Report ${assignedFsrNo} PDF downloaded successfully. Continue to Send Mail?`
+      );
+      if (continueToMail) {
+        navigate("/send-mail", {
+          state: {
+            to: form.customerEmail || "",
+            cc: defaultEngineerEmail,
+            subject: `Field Service Report - ${assignedFsrNo}`,
+            message: `Please find attached Field Service Report ${assignedFsrNo}.`,
+          },
+        });
+      }
     } catch (error) {
       setMessage(error.message || "Unable to submit the report.");
     } finally {
@@ -768,6 +785,18 @@ function SignaturePad({ label, value, onChange }) {
               <textarea id="customerRemarks" name="customerRemarks" value={form.customerRemarks} onChange={handleChange} className="w-full min-h-24 text-sm outline-none focus:bg-sky-50" />
               
               <SignaturePad label="Customer Signature & Seal" value={customerSignature} onChange={setCustomerSignature} />
+              <label htmlFor="customerSignName" className="mt-2 block text-xs font-bold text-slate-700">
+                Customer Name
+                <input
+                  id="customerSignName"
+                  name="customerSignName"
+                  type="text"
+                  value={form.customerSignName}
+                  onChange={handleChange}
+                  placeholder="Enter customer name"
+                  className="mt-1 block h-9 w-full rounded border border-slate-300 px-2 text-sm font-normal outline-none focus:border-sky-500"
+                />
+              </label>
             </div>
 
             <div className="p-2">
@@ -818,19 +847,38 @@ const FsrPdfPage = forwardRef(function FsrPdfPage(
   const label = "font-normal text-[#444]";
   const value = (text) => text === null || text === undefined || text === "" ? "—" : text;
   const detail = (title, text) => <><span className={label}>{title}: </span><span>{value(text)}</span></>;
+  const formatDate = (date) => {
+    if (!date) return "—";
+    const datePart = String(date).slice(0, 10);
+    const match = datePart.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return match ? `${match[3]}/${match[2]}/${match[1]}` : value(date);
+  };
   const option = (selected, title) => (
-    <span className="grid grid-cols-[minmax(0,1fr)_11px] items-center justify-self-start gap-[8px] mb-[3px]">
-      <span className="leading-[1.5] [overflow-wrap:anywhere]">{title}</span>
-      <span className="inline-flex h-[5px] w-[7px] shrink-0 items-center justify-center rounded-[2px] text-[12px] leading-none">{selected ? "✓" : ""}</span>
+    <span className="inline-grid grid-cols-[12px_minmax(0,1fr)] items-center justify-self-start gap-[5px] text-[12px] leading-[1.2]">
+      <span className={`inline-flex h-[11px] w-[11px] shrink-0 items-center justify-center rounded-[2px] text-[12px] font-bold leading-none ${selected ? "text-black" : ""}`}>{selected ? "✓" : ""}</span>
+      <span className={`min-w-0 text-[12px] leading-[1.2] [overflow-wrap:anywhere] ${selected ? "font-semibold text-black" : "font-normal"}`}>{title}</span>
     </span>
   );
-  const ruled = "whitespace-pre-wrap leading-[18px] [background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_17px,#c4c4c4_17px,#c4c4c4_18px)]";
+  const ruled = "whitespace-pre-wrap leading-[19px] [background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_18px,#c4c4c4_18px,#c4c4c4_19px)]";
+  const bulletText = (text) => {
+    if (text === null || text === undefined || text === "") return value(text);
+    return String(text).split(/\r?\n/).map((line, index) => {
+      const cleanLine = line.replace(/^\s*(?:\u2022|[-*])\s*/, "");
+      if (!cleanLine) return null;
+      return (
+        <div key={`${index}-${cleanLine}`} className="grid grid-cols-[10px_minmax(0,1fr)] items-start gap-[4px]">
+          <span className="font-bold leading-[19px]">{"\u2022"}</span>
+          <span className="min-w-0 whitespace-pre-wrap leading-[19px] [overflow-wrap:anywhere]">{cleanLine}</span>
+        </div>
+      );
+    });
+  };
   const workRow = (title, text, height) => (
     <tr>
       <td colSpan={12} className={`${cell} !p-0`}>
         <div className="flex items-stretch">
           <div className="flex w-[28mm] shrink-0 items-center px-[5px] py-[4px] text-[#444]">{title}</div>
-          <div className={`${ruled} flex min-w-0 flex-1 items-center px-[5px] py-[4px] text-left [overflow-wrap:anywhere] ${height}`}>{value(text)}</div>
+          <div className={`${ruled} min-w-0 flex-1 px-[5px] py-[4px] text-left [overflow-wrap:anywhere] ${height}`}>{bulletText(text)}</div>
         </div>
       </td>
     </tr>
@@ -838,11 +886,11 @@ const FsrPdfPage = forwardRef(function FsrPdfPage(
   const signature = (name, date, image, customer) => (
     <div className="grid grid-cols-[1fr_32mm] items-center gap-[7px]">
       <div className="leading-[18px]">
-        <div>{detail("Name", name)}</div><div>{detail("Date", date)}</div>
+        <div>{detail("Name", name)}</div><div>{detail("Date", formatDate(date))}</div>
       </div>
       <div className="text-center">
         <div className="flex h-[38px] items-end justify-center">{image && <img src={image} alt={customer ? "Customer signature" : "Engineer signature"} className="max-h-[38px] max-w-full object-contain" />}</div>
-        <div className="text-[11px] text-[#444]">{customer ? "Signature & Seal" : "Signature"}</div>
+        <div className="text-[12px] text-[#444]">{customer ? "Signature & Seal" : "Signature"}</div>
       </div>
     </div>
   );
@@ -868,44 +916,49 @@ const FsrPdfPage = forwardRef(function FsrPdfPage(
 
   const headerRows = () => (
     <>
-      <tr className="h-4"><td colSpan={12} className={`${cell} text-center text-[11px] font-semibold`}>FIELD SERVICE REPORT</td></tr>
+      <tr className="h-4"><td colSpan={12} className={`${cell} text-center text-[12px] font-semibold`}>FIELD SERVICE REPORT</td></tr>
       <tr>
-        <td colSpan={6} rowSpan={4} className={`${cell} align-middle`}>
-          <div className="flex items-center gap-[10px]">
-            <div className="w-[40mm] shrink-0"><img src={icon} alt="Smartfix Automation" className="block max-h-[48px] w-full object-contain" /></div>
-            <div className="text-[11px] leading-[1.5]">
-              <strong className="text-[11px] font-semibold">SMARTFIX AUTOMATION</strong>
+        <td colSpan={7} rowSpan={4} className={`${cell} align-middle`}>
+          <div className="grid grid-cols-[40mm_minmax(0,1fr)] items-center gap-[10px]">
+            <div className="flex w-[40mm] items-center justify-center"><img src={icon} alt="Smartfix Automation" className="block max-h-[48px] max-w-[38mm] object-contain" /></div>
+            <div className="min-w-0 text-left text-[12px] leading-[1.5]">
+              <strong className="text-[12px] font-semibold">SMARTFIX AUTOMATION</strong>
               <div>No. 5/12, Chetty Street, Poonamallee,<br />Chennai, Tamil Nadu - 600056<br />Mail: csm@smartfixautomation.com<br />+91 9894571542</div>
             </div>
           </div>
         </td>
-        <td colSpan={3} className={cell}>{detail("FSR No", fsrNo)}</td>
-        <td colSpan={3} className={cell}>{detail("Date", form.date)}</td>
+        <td colSpan={3} className={`${cell} text-[13px] font-bold`}><span>FSR No: </span><span>{value(fsrNo)}</span></td>
+        <td colSpan={2} className={`${cell} text-[13px] font-bold`}><span>Date: </span><span>{formatDate(form.date)}</span></td>
       </tr>
-      <tr><td colSpan={6} className={cell}>{detail("Ref.No", form.refNo)}</td></tr>
-      <tr><td colSpan={3} className={cell}>{detail("Start Date", form.startDate)}</td><td colSpan={3} className={cell}>{detail("End Date", form.endDate)}</td></tr>
-      <tr><td colSpan={6} className={cell}><div className="mb-[3px] font-semibold">VISIT TYPE:</div><div className="grid grid-cols-2 items-start justify-self-start gap-x-[8px] gap-y-[4px]">{option(form.visitType === "chargeable", "CHARGEABLE")}{option(form.visitType === "non-chargeable", "NON CHARGEABLE")}</div></td></tr>
+      <tr><td colSpan={2} className={cell}>{detail("Ref.No", form.refNo)}</td><td colSpan={3} className={cell}>{detail("Start Date", formatDate(form.startDate))}</td></tr>
+      <tr><td colSpan={5} className={cell}>{detail("End Date", formatDate(form.endDate))}</td></tr>
+      <tr><td colSpan={5} className={cell}><div className="mb-[5px] pb-[3px] text-[12px] leading-[1.2]">Visit Type</div><div className="grid grid-cols-2 items-start gap-x-[10px] gap-y-[4px] font-semibold text-[12px]">{option(form.visitType === "chargeable", "Chargeable")}{option(form.visitType === "non-chargeable", "Non Chargeable")}</div></td></tr>
     </>
   );
 
-  const serviceRows = () => (
+  const primaryRows = (expanded = false) => (
     <>
       <tr>
         <td colSpan={7} className={cell}>
-          <span className="font-semibold">CUSTOMER DETAILS: </span><span>{value(form.customerName)}</span>
+          <span className="">Customer Details: </span><span className="text-[12px] font-bold">{value(form.customerName)}</span>
           <div>{value(form.customerAddress)}</div>
           <div className="mt-[3px]">{detail("LOCATION", form.locationName)}</div>
         </td>
-        <td colSpan={5} rowSpan={2} className={cell}>
-          <div className="mb-[3px] font-semibold">CATEGORY:</div>
-          <div className="grid grid-cols-2 items-center gap-x-[10px] gap-y-[6px]">
-            {[["service", "SERVICE"], ["emc", "EMC"], ["project", "PROJECT"], ["warranty", "WARRANTY"], ["demo-training", "DEMO/TRAINING"], ["system-study", "SYSTEM STUDY"]].map(([key, title]) => <span key={key}>{option(form.category === key, title)}</span>)}
+        <td colSpan={5} rowSpan={2} className={`${cell} justify-between`}>
+          <div className="mb-[5px] pb-[3px] text-[12px] leading-[1.2]">Category</div>
+          <div className="grid grid-cols-2 items-center gap-x-[10px] gap-y-[6px] font-semibold  text-[12px]">
+            {[["service", "Service"], ["emc", "Emc"], ["project", "Project"], ["warranty", "Warranty"], ["demo-training", "Demo/Training"], ["system-study", "System Study"]].map(([key, title]) => <span key={key}>{option(form.category === key, title)}</span>)}
           </div>
         </td>
       </tr>
       <tr><td colSpan={7} className={cell}><div>{detail("Contact Person Name", form.contactPerson)}</div><div>{detail("Mobile", form.mobile)}<span className="ml-[12px]">{detail("EMAIL", form.customerEmail)}</span></div></td></tr>
-      {workRow("Customer Issue:", form.customerIssue, "min-h-[22mm]")}
+      {workRow("Customer Issue:", form.customerIssue, expanded ? "h-[40mm] overflow-hidden" : "min-h-[22mm]")}
       {workRow("Action:", form.action, "min-h-[50mm]")}
+    </>
+  );
+
+  const statusRows = () => (
+    <>
       <tr><td colSpan={12} className={cell}><div className="grid grid-cols-[20mm_repeat(3,minmax(0,1fr))] items-center justify-items-start gap-x-[2px] gap-y-[2px]"><span>Call Status:</span>{option(form.callStatus === "completed", "Completed")}{option(form.callStatus === "pending", "Pending")}{option(form.callStatus === "spare-required", "Spare Required")}</div></td></tr>
       <tr><td colSpan={12} className={cell}>{detail("Spare Details", form.spareDetails)}</td></tr>
       <tr>
@@ -923,7 +976,7 @@ const FsrPdfPage = forwardRef(function FsrPdfPage(
     <>
       <tr>
         <td colSpan={12} className={`${cell} !p-0`}>
-          <table className="w-full table-fixed border-collapse text-[9px] leading-[1.45]">
+          <table className="w-full table-fixed border-collapse text-[12px] leading-[1.45]">
             <colgroup><col className="w-[19mm]" />{Array.from({ length: 6 }, (_, i) => <col key={i} />)}</colgroup>
             <tbody>
               <tr>
@@ -931,22 +984,22 @@ const FsrPdfPage = forwardRef(function FsrPdfPage(
                 {["No. of Persons", "Total No. of Working Days", "Over Time (Hrs)", "Extra MAN Days (Over Time)", "Total No. of MAN Days", "Total No. of Payable Days"].map((title, i) => <td key={title} className={`border-b border-[#8b8b8b] px-[6px] py-[6px] align-middle [overflow-wrap:anywhere] ${i < 5 ? "border-r" : ""}`}>{title}</td>)}
               </tr>
               <tr>
-                {[form.noOfPersons, form.workingDays, form.overtimeHours, form.extraManDays, form.totalManDays, form.payableDays].map((text, i) => <td key={i} className={`h-[8mm] border-[#8b8b8b] px-[6px] py-[6px] align-middle [overflow-wrap:anywhere] ${i < 5 ? "border-r" : ""}`}>{value(text)}</td>)}
+                {[form.persons, form.workingDays, form.overtimeHours, form.extraManDays, form.totalManDays, form.payableDays].map((text, i) => <td key={i} className={`h-[8mm] border-[#8b8b8b] px-[6px] py-[6px] align-middle [overflow-wrap:anywhere] ${i < 5 ? "border-r" : ""}`}>{value(text)}</td>)}
               </tr>
             </tbody>
           </table>
         </td>
       </tr>
       <tr>
-        <td colSpan={6} className={`${cell} !p-0`}><div className="px-[7px] pt-[6px] pb-[3px] underline">Customer Remarks:</div><div className={`${ruled} flex min-h-[22mm] items-center px-[7px] py-[6px] text-left [overflow-wrap:anywhere]`}>{value(form.customerRemarks)}</div><div className="px-[7px] pt-[5px] pb-[6px]">{signature(form.customerSignName, form.customerSignDate, customerSignature, true)}</div></td>
-        <td colSpan={6} className={`${cell} !p-0`}><div className="px-[7px] pt-[6px] pb-[3px] underline">Engineer&apos;s Remarks:</div><div className={`${ruled} flex min-h-[22mm] items-center px-[7px] py-[6px] text-left [overflow-wrap:anywhere]`}>{value(form.engineerRemarks)}</div><div className="px-[7px] pt-[5px] pb-[6px]">{signature(form.engineerName, form.engineerSignDate, engineerSignature, false)}</div></td>
+        <td colSpan={6} className={`${cell} !p-0`}><div className="px-[7px] pt-[6px] pb-[3px] underline">Customer Remarks:</div><div className={`${ruled} flex min-h-[22mm] items-center px-[7px] py-[6px] text-left [overflow-wrap:anywhere]`}>{value(form.customerRemarks)}</div><div className="px-[7px] pt-[5px] pb-[6px]">{signature(form.customerSignName, form.date, customerSignature, true)}</div></td>
+        <td colSpan={6} className={`${cell} !p-0`}><div className="px-[7px] pt-[6px] pb-[3px] underline">Engineer&apos;s Remarks:</div><div className={`${ruled} flex min-h-[22mm] items-center px-[7px] py-[6px] text-left [overflow-wrap:anywhere]`}>{value(form.engineerRemarks)}</div><div className="px-[7px] pt-[5px] pb-[6px]">{signature(form.engineerName, form.date, engineerSignature, false)}</div></td>
       </tr>
     </>
   );
 
   const page = (rows, key) => (
-    <div key={key} data-pdf-page className="box-border h-[297mm] w-[210mm] shrink-0 overflow-hidden bg-white p-[10mm] text-[11px] leading-[1.45] text-[#333] [font-family:Arial,sans-serif]">
-      <table className={`w-full table-fixed border-collapse text-[11px] leading-[1.45] ${key !== "billing" ? "h-full" : ""}`}>
+    <div key={key} data-pdf-page className="box-border h-[297mm] w-[210mm] shrink-0 overflow-hidden bg-white p-[10mm] text-[12px] leading-[1.45] text-[#333] [font-family:Arial,sans-serif]">
+      <table className={`w-full table-fixed border-collapse text-[12px] leading-[1.45] ${key !== "continuation" ? "h-full" : ""}`}>
         {columns()}
         <tbody>{rows}</tbody>
       </table>
@@ -956,13 +1009,13 @@ const FsrPdfPage = forwardRef(function FsrPdfPage(
   return (
     <div ref={ref} className="relative w-[210mm]">
       {useTwoPages
-        ? <>{page(<>{headerRows()}{serviceRows()}</>, "service")}{page(<>{headerRows()}{billingRows()}</>, "billing")}</>
-        : page(<>{headerRows()}{serviceRows()}{billingRows()}</>, "single")}
+        ? <>{page(<>{headerRows()}{primaryRows(true)}</>, "service")}{page(<>{headerRows()}{statusRows()}{billingRows()}</>, "continuation")}</>
+        : page(<>{headerRows()}{primaryRows()}{statusRows()}{billingRows()}</>, "single")}
 
-      <div ref={measureRef} aria-hidden="true" className="invisible absolute left-0 top-0 box-border h-[297mm] w-[210mm] overflow-hidden bg-white p-[10mm] text-[11px] leading-[1.45] [font-family:Arial,sans-serif]">
-        <table ref={measureTableRef} className="h-full w-full table-fixed border-collapse text-[11px] leading-[1.45]">
+      <div ref={measureRef} aria-hidden="true" className="invisible absolute left-0 top-0 box-border h-[297mm] w-[210mm] overflow-hidden bg-white p-[10mm] text-[12px] leading-[1.45] [font-family:Arial,sans-serif]">
+        <table ref={measureTableRef} className="h-full w-full table-fixed border-collapse text-[12px] leading-[1.45]">
           {columns()}
-          <tbody>{headerRows()}{serviceRows()}{billingRows()}</tbody>
+          <tbody>{headerRows()}{primaryRows()}{statusRows()}{billingRows()}</tbody>
         </table>
       </div>
     </div>
