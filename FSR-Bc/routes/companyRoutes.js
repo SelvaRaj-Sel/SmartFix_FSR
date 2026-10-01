@@ -47,7 +47,7 @@ router.get("/", authMiddleware, async (req, res) => {
 // POST /api/companies - Create company (Admin only)
 router.post("/", authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { name, address, contactPerson, email, mobile, locations } = req.body;
+    const { name, address, contactPerson, email, mobile, contactPersons, locations } = req.body;
     if (!name || !String(name).trim()) {
       return res.status(400).json({ message: "Company name is required" });
     }
@@ -58,6 +58,7 @@ router.post("/", authMiddleware, adminOnly, async (req, res) => {
       contactPerson: String(contactPerson || "").trim(),
       email: String(email || "").trim().toLowerCase(),
       mobile: String(mobile || "").trim(),
+      contactPersons: Array.isArray(contactPersons) ? contactPersons : [],
       locations: Array.isArray(locations) ? locations : [],
     });
 
@@ -75,7 +76,7 @@ router.put("/:id", authMiddleware, adminOnly, async (req, res) => {
       return res.status(400).json({ message: "Invalid company ID" });
     }
 
-    const { name, address, contactPerson, email, mobile, locations } = req.body;
+    const { name, address, contactPerson, email, mobile, contactPersons, locations } = req.body;
     if (!name || !String(name).trim()) {
       return res.status(400).json({ message: "Company name is required" });
     }
@@ -90,11 +91,14 @@ router.put("/:id", authMiddleware, adminOnly, async (req, res) => {
     if (Array.isArray(locations)) {
       updateFields.locations = locations;
     }
+    if (Array.isArray(contactPersons)) {
+      updateFields.contactPersons = contactPersons;
+    }
 
     const company = await Company.findByIdAndUpdate(
       req.params.id,
       updateFields,
-      { new: true }
+      { returnDocument: "after" }
     );
 
     if (!company) {
@@ -124,52 +128,6 @@ router.delete("/:id", authMiddleware, adminOnly, async (req, res) => {
   } catch (error) {
     console.error("Error deleting company:", error);
     res.status(500).json({ message: "Could not delete company" });
-  }
-});
-
-// POST /api/companies/:id/locations - Add Location to Company (Admin only)
-router.post("/:id/locations", authMiddleware, adminOnly, async (req, res) => {
-  try {
-    const { locationName, address, contactPersons } = req.body;
-    if (!locationName || !String(locationName).trim()) {
-      return res.status(400).json({ message: "Location name is required" });
-    }
-
-    const company = await Company.findById(req.params.id);
-    if (!company) {
-      return res.status(404).json({ message: "Company not found" });
-    }
-
-    company.locations.push({
-      locationName: String(locationName).trim(),
-      address: String(address || "").trim(),
-      contactPersons: Array.isArray(contactPersons) ? contactPersons : [],
-    });
-
-    await company.save();
-    res.status(201).json({ company });
-  } catch (error) {
-    console.error("Error adding location:", error);
-    res.status(500).json({ message: "Could not add location" });
-  }
-});
-
-// DELETE /api/companies/:id/locations/:locId - Delete Location (Admin only)
-router.delete("/:id/locations/:locId", authMiddleware, adminOnly, async (req, res) => {
-  try {
-    const company = await Company.findById(req.params.id);
-    if (!company) {
-      return res.status(404).json({ message: "Company not found" });
-    }
-
-    company.locations = company.locations.filter(
-      (loc) => String(loc._id) !== String(req.params.locId)
-    );
-    await company.save();
-    res.json({ company });
-  } catch (error) {
-    console.error("Error deleting location:", error);
-    res.status(500).json({ message: "Could not delete location" });
   }
 });
 

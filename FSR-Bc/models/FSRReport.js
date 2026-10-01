@@ -35,11 +35,14 @@ const fsrReportSchema = new mongoose.Schema(
     customerSignName: { type: String, default: "" },
     customerSignDate: { type: String, default: "" },
     engineerName: { type: String, default: "" },
+    engineerId: { type: String, trim: true, default: "" },
     engineerSignDate: { type: String, default: "" },
     customerSignature: { type: String, default: "" },
     engineerSignature: { type: String, default: "" },
 
     pdfUrl: { type: String, default: "" },
+    pdfData: { type: Buffer, select: false },
+    pdfContentType: { type: String, default: "application/pdf", select: false },
     submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true }

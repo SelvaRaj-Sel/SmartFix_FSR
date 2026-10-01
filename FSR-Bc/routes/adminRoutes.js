@@ -206,9 +206,41 @@ router.patch("/users/:id/promote", async (req, res) => {
   }
 });
 
+router.patch("/users/:id/demote", async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: "Invalid user ID" });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    if (user.id === req.admin.id) {
+      return res.status(400).json({ message: "You cannot downgrade your own admin account" });
+    }
+    if (user.role !== "admin" || user.status !== "approved") {
+      return res.status(400).json({ message: "Only approved admins can be downgraded" });
+    }
+
+    const approvedAdminCount = await User.countDocuments({ role: "admin", status: "approved" });
+    if (approvedAdminCount <= 1) {
+      return res.status(400).json({ message: "Cannot downgrade the last approved admin" });
+    }
+
+    user.role = "user";
+    await user.save();
+    res.json({ user: publicUser(user) });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Could not downgrade admin" });
+  }
+});
+
 router.get("/notifications", async (req, res) => {
   try {
-    const notifications = await Notification.find()
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const notifications = await Notification.find({ createdAt: { $gte: oneDayAgo } })
       .sort({ createdAt: -1 })
       .limit(100);
 
@@ -232,9 +264,7 @@ router.get("/notifications", async (req, res) => {
 
 router.get("/notifications/daily", async (req, res) => {
   try {
-    const since = new Date(
-      Date.now() - 31 * 24 * 60 * 60 * 1000
-    );
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
     const results = await Notification.aggregate([
       {
@@ -294,7 +324,7 @@ router.patch("/notifications/:id/read", async (req, res) => {
     const notification = await Notification.findByIdAndUpdate(
       req.params.id,
       { read: true },
-      { new: true }
+      { returnDocument: "after" }
     );
 
     if (!notification) {

@@ -1,28 +1,24 @@
 import { Router } from "express";
 import jwt from "jsonwebtoken";
 import multer from "multer";
-import path from "path";
-import fs from "fs";
 import FSRReport from "../models/FSRReport.js";
 import FSRSequence from "../models/FSRSequence.js";
 import User from "../models/User.js";
 
 const router = Router();
 
-// Ensure uploads/reports directory exists
-const uploadDir = path.join(process.cwd(), "uploads", "reports");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname) || ".pdf";
-    cb(null, `FSR_${Date.now()}${ext}`);
+// Keep uploaded PDFs in memory until they are stored in MongoDB.
+// This avoids creating permanent files under uploads/reports.
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype !== "application/pdf") {
+      return cb(new Error("Only PDF files are allowed"));
+    }
+    cb(null, true);
   },
 });
-const upload = multer({ storage });
 
 // Middleware to authenticate user
 async function authMiddleware(req, res, next) {
@@ -53,7 +49,12 @@ router.get("/next-number", authMiddleware, async (req, res) => {
     }
     const nextNum = seq.currentNumber + 1;
     const formattedNo = `${seq.prefix}${seq.year}-${String(nextNum).padStart(seq.digits, "0")}`;
-    res.json({ nextFsrNo: formattedNo, year: seq.year });
+    res.json({
+      nextFsrNo: formattedNo,
+      year: seq.year,
+      engineerName: req.user.name || req.user.email || "",
+      engineerId: req.user.employeeid || "",
+    });
   } catch (error) {
     console.error("Error generating next FSR number preview:", error);
     res.status(500).json({ message: "Could not generate FSR number preview" });
@@ -87,6 +88,7 @@ router.get("/", authMiddleware, async (req, res) => {
     const total = await FSRReport.countDocuments(filter);
     const reports = await FSRReport.find(filter)
       .populate("companyId")
+      .populate("submittedBy", "name employeeid")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
@@ -130,8 +132,13 @@ router.post("/", authMiddleware, async (req, res) => {
       ...req.body,
       fsrNo: assignedFsrNo,
       engineerName: req.body.engineerName || req.user.name || req.user.email,
+      engineerId: req.user.employeeid || req.body.engineerId || "",
       submittedBy: req.user._id,
     };
+
+    // A manually entered company has a name but no saved Company document yet.
+    // Do not pass an empty string to an optional ObjectId field.
+    if (!reportData.companyId) delete reportData.companyId;
 
     const report = await FSRReport.create(reportData);
     res.status(201).json({
@@ -145,18 +152,47 @@ router.post("/", authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/reports/:id/pdf - Save PDF file on backend
+// GET /api/reports/:id/pdf - View a PDF stored in MongoDB
+router.get("/:id/pdf", authMiddleware, async (req, res) => {
+  try {
+    const report = await FSRReport.findById(req.params.id).select("+pdfData +pdfContentType fsrNo submittedBy");
+    if (!report || !report.pdfData) {
+      return res.status(404).json({ message: "PDF not found" });
+    }
+    if (req.user.role !== "admin" && String(report.submittedBy) !== String(req.user._id)) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const safeFsrNo = String(report.fsrNo || "FSR").replace(/[^a-zA-Z0-9_-]/g, "_");
+    res.set({
+      "Content-Type": report.pdfContentType || "application/pdf",
+      "Content-Disposition": `inline; filename="${safeFsrNo}.pdf"`,
+      "Content-Length": report.pdfData.length,
+      "Cache-Control": "private, no-store",
+    });
+    res.send(report.pdfData);
+  } catch (error) {
+    console.error("Error loading report PDF:", error);
+    res.status(500).json({ message: "Could not load PDF" });
+  }
+});
+
+// POST /api/reports/:id/pdf - Store PDF in MongoDB (not in a server folder)
 router.post("/:id/pdf", authMiddleware, upload.single("pdf"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: "No PDF file uploaded" });
     }
 
-    const relativePath = `/uploads/reports/${req.file.filename}`;
+    const pdfPath = `/api/reports/${req.params.id}/pdf`;
     const report = await FSRReport.findByIdAndUpdate(
       req.params.id,
-      { pdfUrl: relativePath },
-      { new: true }
+      {
+        pdfUrl: pdfPath,
+        pdfData: req.file.buffer,
+        pdfContentType: req.file.mimetype,
+      },
+      { returnDocument: "after" }
     );
 
     if (!report) {
@@ -165,8 +201,8 @@ router.post("/:id/pdf", authMiddleware, upload.single("pdf"), async (req, res) =
 
     res.json({
       success: true,
-      pdfUrl: relativePath,
-      message: "PDF saved successfully on backend",
+      pdfUrl: pdfPath,
+      message: "PDF stored successfully",
       report,
     });
   } catch (error) {

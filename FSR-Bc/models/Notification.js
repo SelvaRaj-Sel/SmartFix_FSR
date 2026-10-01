@@ -14,4 +14,7 @@ const notificationSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// MongoDB automatically removes each notification 24 hours after creation.
+notificationSchema.index({ createdAt: 1 }, { expireAfterSeconds: 24 * 60 * 60 });
+
 export default mongoose.model("Notification", notificationSchema);

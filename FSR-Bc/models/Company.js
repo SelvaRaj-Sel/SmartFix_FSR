@@ -20,11 +20,14 @@ const companySchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-    // Main / Default Contact details
+    // Legacy single-contact fields (kept for existing records)
     contactPerson: { type: String, trim: true, default: "" },
     email: { type: String, trim: true, lowercase: true, default: "" },
     mobile: { type: String, trim: true, default: "" },
     address: { type: String, trim: true, default: "" },
+
+    // Multiple company-level contacts
+    contactPersons: [contactPersonSchema],
 
     // Multiple Locations & Contacts
     locations: [locationSchema],

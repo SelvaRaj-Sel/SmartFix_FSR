@@ -51,9 +51,9 @@ function formatDay(key) {
 
 function StatCard({ label, value, color }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#0b1b2b] p-5 shadow-lg shadow-black/10">
-      <p className="text-sm text-slate-400">{label}</p>
-      <p className={`mt-2 text-3xl font-bold ${color}`}>{value}</p>
+    <div className="rounded-2xl flex items-center justify-between border border-white/10 bg-[#0b1b2b] p-5 shadow-lg shadow-black/10">
+      <p className=" text-[1.15rem] font-bold">{label}</p>
+      <p className={`text-3xl font-bold ${color}`}>{value}</p>
     </div>
   );
 }
@@ -81,22 +81,18 @@ export default function AdminUsersPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [filter, setFilter] = useState("pending");
+  const [userPage, setUserPage] = useState(1);
+  const [companyPage, setCompanyPage] = useState(1);
 
   // Password Modals state
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [resettingUser, setResettingUser] = useState(null);
   const [resetPasswordVal, setResetPasswordVal] = useState("");
 
-  // Company & Location CRUD state
+  // Company CRUD state
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [editingCompany, setEditingCompany] = useState(null);
-  const [companyForm, setCompanyForm] = useState({ name: "", address: "", contactPerson: "", email: "", mobile: "" });
-  
-  const [locationCompanyId, setLocationCompanyId] = useState(null);
-  const [locationForm, setLocationForm] = useState({ locationName: "", address: "" });
-  
-  const [contactLocationTarget, setContactLocationTarget] = useState(null);
-  const [contactForm, setContactForm] = useState({ name: "", designation: "", email: "", mobile: "" });
+  const [companyForm, setCompanyForm] = useState({ name: "", address: "", contactPersons: [{ name: "", mobile: "", email: "" }] });
 
   // FSR Sequence Config state
   const [seqConfig, setSeqConfig] = useState({ year: new Date().getFullYear(), prefix: "FSR", currentNumber: 0, digits: 3 });
@@ -205,6 +201,19 @@ export default function AdminUsersPage() {
     finally { setBusyUserId(null); }
   }
 
+  async function demoteUser(user) {
+    const id = getId(user);
+    if (!window.confirm(`Downgrade ${user.email} from admin to user?`)) return;
+    setBusyUserId(id);
+    setError(""); setNotice("");
+    try {
+      await apiRequest(`/admin/users/${encodeURIComponent(id)}/demote`, { method: "PATCH" });
+      await loadData();
+      setNotice(`${user.email} is now a normal user.`);
+    } catch (err) { setError(err.message); }
+    finally { setBusyUserId(null); }
+  }
+
   async function removeUser(user) {
     const id = getId(user);
     if (!window.confirm(`Permanently remove ${user.email}?`)) return;
@@ -261,7 +270,7 @@ export default function AdminUsersPage() {
   // Company CRUD actions
   function openAddCompany() {
     setEditingCompany(null);
-    setCompanyForm({ name: "", address: "", contactPerson: "", email: "", mobile: "" });
+    setCompanyForm({ name: "", address: "", contactPersons: [{ name: "", mobile: "", email: "" }] });
     setShowCompanyModal(true);
   }
 
@@ -270,9 +279,9 @@ export default function AdminUsersPage() {
     setCompanyForm({
       name: company.name || "",
       address: company.address || "",
-      contactPerson: company.contactPerson || "",
-      email: company.email || "",
-      mobile: company.mobile || "",
+      contactPersons: company.contactPersons?.length
+        ? company.contactPersons.map(({ name = "", mobile = "", email = "" }) => ({ name, mobile, email }))
+        : [{ name: company.contactPerson || "", mobile: company.mobile || "", email: company.email || "" }],
     });
     setShowCompanyModal(true);
   }
@@ -281,20 +290,28 @@ export default function AdminUsersPage() {
     event.preventDefault();
     setError(""); setNotice("");
     try {
+      const payload = {
+        ...companyForm,
+        contactPersons: companyForm.contactPersons.filter((contact) => contact.name.trim()),
+        contactPerson: "",
+        mobile: "",
+        email: "",
+      };
       if (editingCompany) {
         await apiRequest(`/companies/${encodeURIComponent(getId(editingCompany))}`, {
           method: "PUT",
-          body: JSON.stringify({ ...companyForm, locations: editingCompany.locations || [] }),
+          body: JSON.stringify(payload),
         });
         setNotice(`Company "${companyForm.name}" updated.`);
       } else {
         await apiRequest("/companies", {
           method: "POST",
-          body: JSON.stringify({ ...companyForm, locations: [] }),
+          body: JSON.stringify(payload),
         });
         setNotice(`Company "${companyForm.name}" created.`);
       }
       setShowCompanyModal(false);
+      setCompanyPage(1);
       await loadData();
     } catch (err) { setError(err.message); }
   }
@@ -305,65 +322,6 @@ export default function AdminUsersPage() {
     try {
       await apiRequest(`/companies/${encodeURIComponent(getId(company))}`, { method: "DELETE" });
       setNotice(`Company "${company.name}" deleted.`);
-      await loadData();
-    } catch (err) { setError(err.message); }
-  }
-
-  // Location Actions
-  async function addLocationToCompany(event) {
-    event.preventDefault();
-    if (!locationCompanyId) return;
-    setError(""); setNotice("");
-    try {
-      await apiRequest(`/companies/${encodeURIComponent(locationCompanyId)}/locations`, {
-        method: "POST",
-        body: JSON.stringify(locationForm),
-      });
-      setNotice("Location added to company.");
-      setLocationCompanyId(null);
-      setLocationForm({ locationName: "", address: "" });
-      await loadData();
-    } catch (err) { setError(err.message); }
-  }
-
-  async function deleteLocation(companyId, locId) {
-    if (!window.confirm("Delete this location?")) return;
-    setError(""); setNotice("");
-    try {
-      await apiRequest(`/companies/${encodeURIComponent(companyId)}/locations/${encodeURIComponent(locId)}`, {
-        method: "DELETE",
-      });
-      setNotice("Location removed.");
-      await loadData();
-    } catch (err) { setError(err.message); }
-  }
-
-  // Contact Person Actions
-  async function addContactToLocation(event) {
-    event.preventDefault();
-    if (!contactLocationTarget) return;
-    const { companyId, locId } = contactLocationTarget;
-    const comp = companies.find((c) => getId(c) === String(companyId));
-    if (!comp) return;
-
-    const updatedLocations = (comp.locations || []).map((loc) => {
-      if (String(loc._id) === String(locId)) {
-        return {
-          ...loc,
-          contactPersons: [...(loc.contactPersons || []), contactForm],
-        };
-      }
-      return loc;
-    });
-
-    try {
-      await apiRequest(`/companies/${encodeURIComponent(companyId)}`, {
-        method: "PUT",
-        body: JSON.stringify({ name: comp.name, address: comp.address, contactPerson: comp.contactPerson, email: comp.email, mobile: comp.mobile, locations: updatedLocations }),
-      });
-      setNotice("Contact person added to location.");
-      setContactLocationTarget(null);
-      setContactForm({ name: "", designation: "", email: "", mobile: "" });
       await loadData();
     } catch (err) { setError(err.message); }
   }
@@ -395,7 +353,40 @@ export default function AdminUsersPage() {
     fetchReports(1, "", "");
   }
 
+  async function viewReportPdf(report) {
+    setError("");
+    const previewWindow = window.open("", "_blank");
+    if (!previewWindow) {
+      setError("Please allow pop-ups to view the PDF");
+      return;
+    }
+    previewWindow.opener = null;
+    try {
+      const token = localStorage.getItem("smartfix_auth_token");
+      const pdfUrl = `${API_BASE.replace(/\/api$/, "")}${report.pdfUrl}`;
+      const response = await fetch(pdfUrl, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || "Could not load PDF");
+      }
+      const blobUrl = URL.createObjectURL(await response.blob());
+      previewWindow.location.href = blobUrl;
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+    } catch (err) {
+      previewWindow.close();
+      setError(err.message);
+    }
+  }
+
   const visibleUsers = filter === "all" ? users : users.filter((user) => user.status === filter);
+  const userTotalPages = Math.max(1, Math.ceil(visibleUsers.length / 6));
+  const currentUserPage = Math.min(userPage, userTotalPages);
+  const paginatedUsers = visibleUsers.slice((currentUserPage - 1) * 6, currentUserPage * 6);
+  const companyTotalPages = Math.max(1, Math.ceil(companies.length / 8));
+  const currentCompanyPage = Math.min(companyPage, companyTotalPages);
+  const paginatedCompanies = companies.slice((currentCompanyPage - 1) * 8, currentCompanyPage * 8);
   const pendingCount = users.filter((user) => user.status === "pending").length;
   const approvedCount = users.filter((user) => user.status === "approved").length;
   const unreadCount = notifications.filter((item) => !item.read).length;
@@ -442,7 +433,7 @@ export default function AdminUsersPage() {
         <div className="mt-8 flex flex-wrap border-b border-white/10 gap-4 sm:gap-8">
           {[
             ["users", `Users & Reset Password (${users.length})`],
-            ["companies", `Companies, Locations & Contacts (${companies.length})`],
+            ["companies", `Companies & Contacts (${companies.length})`],
             ["fsr-config", "Annual FSR Numbering Setup"],
             ["reports", `FSR Reports (${reportPagination.total})`],
           ].map(([key, label]) => (
@@ -461,20 +452,20 @@ export default function AdminUsersPage() {
 
         {/* TAB 1: USERS & PASSWORD RESET */}
         {activeTab === "users" && (
-          <div className="mt-7 grid items-start gap-6 xl:grid-cols-[1.5fr_1fr]">
+          <div className="mt-5 grid items-start gap-6 xl:grid-cols-[1.5fr_1fr]">
             <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#0b1b2b]">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 p-5">
-                <div><h2 className="text-lg font-bold">Users</h2><p className="text-sm text-slate-400">Approve, reset password, disable, or promote accounts.</p></div>
-                <select value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="Filter users" className="rounded-lg border border-white/15 bg-[#071421] px-3 py-2 text-sm text-white">
+                <div><h2 className="text-lg font-bold">Users</h2><p className="text-sm text-slate-400">Approve, reset password, disable, promote, or downgrade accounts.</p></div>
+                <select value={filter} onChange={(event) => { setFilter(event.target.value); setUserPage(1); }} aria-label="Filter users" className="rounded-lg border border-white/15 bg-[#071421] px-3 py-2 text-sm text-white">
                   {["pending", "approved", "rejected", "disabled", "all"].map((value) => <option key={value} value={value}>{value === "all" ? "All users" : value[0].toUpperCase() + value.slice(1)}</option>)}
                 </select>
               </div>
               {loading ? <p className="p-6 text-sm text-slate-400">Loading users...</p> : visibleUsers.length === 0 ? <p className="p-6 text-sm text-slate-400">No users found.</p> : (
                 <div className="divide-y divide-white/10">
-                  {visibleUsers.map((user) => {
+                  {paginatedUsers.map((user) => {
                     const id = getId(user);
                     const isSelf = id === String(currentUser?.id);
-                    return <article key={id} className="flex flex-wrap items-center justify-between gap-4 p-5">
+                    return <article key={id} className="flex flex-wrap items-center justify-between gap-4 p-4">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="font-semibold">{user.name || user.email}</h3>
@@ -493,10 +484,18 @@ export default function AdminUsersPage() {
                         {(user.status === "disabled" || user.status === "rejected") && <button disabled={busyUserId === id} onClick={() => updateUserStatus(user, "approved")} className={`${actionClass} border-emerald-400/30 text-emerald-300`}>Restore</button>}
                         {user.status === "disabled" && !isSelf && <button disabled={busyUserId === id} onClick={() => removeUser(user)} className={`${actionClass} border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20`}>Remove</button>}
                         {user.status === "approved" && user.role === "user" && <button disabled={busyUserId === id} onClick={() => promoteUser(user)} className={`${actionClass} border-cyan-400/30 text-cyan-300`}>Promote to admin</button>}
+                        {user.status === "approved" && user.role === "admin" && !isSelf && <button disabled={busyUserId === id} onClick={() => demoteUser(user)} className={`${actionClass} border-amber-400/30 text-amber-300`}>Downgrade to user</button>}
                         {user.status === "approved" && !isSelf && <button disabled={busyUserId === id} onClick={() => updateUserStatus(user, "disabled")} className={`${actionClass} border-red-400/30 text-red-300`}>Disable</button>}
                       </div>
                     </article>;
                   })}
+                  <div className="flex flex-wrap items-center justify-between gap-3 p-4 text-xs text-slate-400">
+                    <span>Page <strong className="text-white">{currentUserPage}</strong> of <strong className="text-white">{userTotalPages}</strong> · {visibleUsers.length} users</span>
+                    <div className="flex gap-2">
+                      <button type="button" disabled={currentUserPage <= 1} onClick={() => setUserPage(currentUserPage - 1)} className={`${actionClass} border-white/20 text-white hover:bg-white/10`}>Previous</button>
+                      <button type="button" disabled={currentUserPage >= userTotalPages} onClick={() => setUserPage(currentUserPage + 1)} className={`${actionClass} border-white/20 text-white hover:bg-white/10`}>Next</button>
+                    </div>
+                  </div>
                 </div>
               )}
             </section>
@@ -523,13 +522,13 @@ export default function AdminUsersPage() {
           </div>
         )}
 
-        {/* TAB 2: COMPANIES, LOCATIONS & CONTACT PERSONS */}
+        {/* TAB 2: COMPANIES & CONTACT PERSONS */}
         {activeTab === "companies" && (
           <section className="mt-7 overflow-hidden rounded-2xl border border-white/10 bg-[#0b1b2b] p-6">
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5">
               <div>
-                <h2 className="text-xl font-bold">Company Master (Multiple Locations & Contacts)</h2>
-                <p className="text-sm text-slate-400">Manage companies with multiple plant/office locations and distinct contact persons.</p>
+                <h2 className="text-xl font-bold">Company Master</h2>
+                <p className="text-sm text-slate-400">Manage company addresses and multiple contact persons.</p>
               </div>
               <button type="button" onClick={openAddCompany} className="rounded-xl bg-[#00A0D2] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#008db9]">+ Add Company</button>
             </div>
@@ -537,68 +536,88 @@ export default function AdminUsersPage() {
             {companies.length === 0 ? (
               <p className="p-8 text-center text-slate-400">No companies created yet. Click "+ Add Company" above.</p>
             ) : (
-              <div className="mt-6 space-y-6">
-                {companies.map((company) => {
+              <div className="mt-2 space-y-2">
+                {paginatedCompanies.map((company) => {
                   const compId = getId(company);
                   return (
-                    <div key={compId} className="rounded-2xl border border-white/10 bg-[#071421] p-6 shadow-md">
-                      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 pb-4">
-                        <div>
-                          <h3 className="text-xl font-bold text-cyan-300">{company.name}</h3>
-                          {company.address && <p className="mt-1 text-xs text-slate-300"><strong>Main HQ Address:</strong> {company.address}</p>}
-                          <div className="mt-2 flex flex-wrap gap-4 text-xs text-slate-400">
-                            {company.contactPerson && <span>👤 Primary Contact: {company.contactPerson}</span>}
-                            {company.email && <span>✉️ {company.email}</span>}
-                            {company.mobile && <span>📞 {company.mobile}</span>}
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <button type="button" onClick={() => { setLocationCompanyId(compId); setLocationForm({ locationName: "", address: "" }); }} className="rounded-lg bg-emerald-600/30 px-3 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-600/50">+ Add Location</button>
-                          <button type="button" onClick={() => openEditCompany(company)} className="rounded-lg border border-cyan-400/30 px-3 py-1.5 text-xs font-semibold text-cyan-300 hover:bg-cyan-400/10">Edit</button>
-                          <button type="button" onClick={() => deleteCompany(company)} className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-semibold text-red-300 hover:bg-red-500/10">Delete</button>
-                        </div>
-                      </div>
+                   <div
+  key={compId}
+  className="rounded-2xl border border-white/10 bg-[#071421] p-3 shadow-md"
+>
+  {/* First row: Company name */}
+  <h3 className="text-xl font-bold text-[#00A0D2]">
+    {company.name}
+  </h3>
 
-                      {/* Locations & Contact Persons List */}
-                      <div className="mt-4">
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Locations & Contact Persons ({company.locations?.length || 0}):</h4>
-                        {(!company.locations || company.locations.length === 0) ? (
-                          <p className="mt-2 text-xs italic text-slate-500">No plant/branch locations added yet. Click "+ Add Location".</p>
-                        ) : (
-                          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                            {company.locations.map((loc) => {
-                              const locId = String(loc._id);
-                              return (
-                                <div key={locId} className="rounded-xl border border-white/10 bg-[#0b1b2b] p-4 text-xs">
-                                  <div className="flex items-center justify-between border-b border-white/10 pb-2">
-                                    <h5 className="font-bold text-white text-sm">📍 {loc.locationName}</h5>
-                                    <button type="button" onClick={() => deleteLocation(compId, locId)} className="text-red-400 hover:underline">Remove</button>
-                                  </div>
-                                  {loc.address && <p className="mt-2 text-slate-300"><strong>Address:</strong> {loc.address}</p>}
-                                  
-                                  <div className="mt-3 border-t border-white/10 pt-2">
-                                    <div className="flex items-center justify-between">
-                                      <span className="font-semibold text-slate-400">Contacts ({loc.contactPersons?.length || 0}):</span>
-                                      <button type="button" onClick={() => { setContactLocationTarget({ companyId: compId, locId }); setContactForm({ name: "", designation: "", email: "", mobile: "" }); }} className="text-cyan-300 hover:underline">+ Contact</button>
-                                    </div>
-                                    <ul className="mt-2 space-y-1">
-                                      {loc.contactPersons?.map((cp, idx) => (
-                                        <li key={idx} className="rounded bg-black/30 p-2 text-[0.75rem] text-slate-300">
-                                          <p className="font-bold text-cyan-200">{cp.name} {cp.designation ? `(${cp.designation})` : ""}</p>
-                                          <p>📞 {cp.mobile || "N/A"} | ✉️ {cp.email || "N/A"}</p>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+  {/* Second row: Address | Contacts | Buttons */}
+  <div className="mt-2 grid grid-cols-1 items-start gap-6 md:grid-cols-[minmax(0,.5fr)_minmax(0,1fr)_auto]">
+    <div className="min-w-0 text-xs text-slate-300">
+      <p className="font-semibold">Company Address:</p>
+
+      {company.address && (
+        <p className="mt-1 whitespace-pre-wrap break-words leading-relaxed">
+          {company.address}
+        </p>
+      )}
+    </div>
+
+    <div className="min-w-0 text-xs text-slate-400">
+      <p className="font-semibold text-slate-300">Contact Persons:</p>
+
+      <div className="mt-1 space-y-2 ">
+        {(company.contactPersons?.length
+          ? company.contactPersons
+          : company.contactPerson
+            ? [{
+                name: company.contactPerson,
+                mobile: company.mobile,
+                email: company.email,
+              }]
+            : []
+        ).map((contact, index) => (
+          <div key={contact._id || index} className="space-y-1 flex gap-3">
+            <p className="break-words font-semibold text-slate-300">
+              {contact.name}
+            </p>
+
+            {contact.mobile && <p>📞 {contact.mobile}</p>}
+
+            {contact.email && (
+              <p className="break-all">✉️ {contact.email}</p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <div className="flex gap-2">
+      <button
+        type="button"
+        onClick={() => openEditCompany(company)}
+        className="rounded-lg border border-cyan-400/30 px-3 py-1.5 text-xs font-semibold text-cyan-300 hover:bg-cyan-400/10"
+      >
+        Edit
+      </button>
+
+      <button
+        type="button"
+        onClick={() => deleteCompany(company)}
+        className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-semibold text-red-300 hover:bg-red-500/10"
+      >
+        Delete
+      </button>
+    </div>
+  </div>
+</div>
                   );
                 })}
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#071421] p-2 text-xs text-slate-400">
+                  <span>Page <strong className="text-white">{currentCompanyPage}</strong> of <strong className="text-white">{companyTotalPages}</strong> · {companies.length} companies</span>
+                  <div className="flex gap-2">
+                    <button type="button" disabled={currentCompanyPage <= 1} onClick={() => setCompanyPage(currentCompanyPage - 1)} className={`${actionClass} text-white hover:cursor-pointer`}>Previous</button>
+                    <button type="button" disabled={currentCompanyPage >= companyTotalPages} onClick={() => setCompanyPage(currentCompanyPage + 1)} className={`${actionClass} text-white hover:cursor-pointer`}>Next</button>
+                  </div>
+                </div>
               </div>
             )}
           </section>
@@ -679,8 +698,8 @@ export default function AdminUsersPage() {
 
         {/* TAB 4: ADMIN REPORT LIST WITH DATE RANGE FILTER & PAGINATION (10 PER PAGE) */}
         {activeTab === "reports" && (
-          <section className="mt-7 overflow-hidden rounded-2xl border border-white/10 bg-[#0b1b2b] p-6">
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5">
+          <section className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-[#0b1b2b] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-3">
               <div>
                 <h2 className="text-xl font-bold">Admin FSR Reports List</h2>
                 <p className="text-sm text-slate-400">View and inspect submitted Field Service Reports with PDF files (10 per page).</p>
@@ -738,37 +757,36 @@ export default function AdminUsersPage() {
                     <thead className="border-b border-white/10 bg-[#071421] text-slate-300">
                       <tr>
                         <th className="p-3">FSR Number</th>
-                        <th className="p-3">Date</th>
-                        <th className="p-3">Company Name</th>
-                        <th className="p-3">Contact Person</th>
-                        <th className="p-3">Status</th>
-                        <th className="p-3">Engineer ID</th>
-                        <th className="p-3">Engineer Name</th>
+                        <th className="">Date</th>
+                        <th className="">Company Name</th>
+                        <th className="">Contact Person</th>
+                        <th className="">Status</th>
+                        <th className="">Engineer ID</th>
+                        <th className="">Engineer Name</th>
                         <th className="p-3 text-right">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/10">
                       {reports.map((rep) => {
-                        const pdfPath = rep.pdfUrl ? `${API_BASE.replace(/\/api$/, "")}${rep.pdfUrl}` : null;
+                        const hasPdf = Boolean(rep.pdfUrl);
                         return (
                           <tr key={getId(rep)} className="hover:bg-white/[0.02]">
-                            <td className="p-3 font-bold text-cyan-300">{rep.fsrNo}</td>
-                            <td className="p-3">{rep.date || formatDate(rep.createdAt)}</td>
-                            <td className="p-3 font-semibold">{rep.customerName || "—"}</td>
-                            <td className="p-3">{rep.contactPerson || "—"}</td>
-                            <td className="p-3"><span className="rounded bg-sky-500/10 px-2 py-0.5 text-sky-300">{rep.callStatus}</span></td>
-                            <td className="p-3 uppercase">{rep.engineerId || "—"}</td>
-                            <td className="p-3 font-medium text-slate-200">{rep.engineerName || "—"}</td>
-                            <td className="p-3 text-right">
-                              {pdfPath ? (
-                                <a
-                                  href={pdfPath}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-1 rounded-lg border border-cyan-400/30 px-3 py-1.5 text-xs font-semibold text-cyan-300 hover:bg-cyan-400/10"
+                            <td className="pl-3 font-bold text-cyan-300">{rep.fsrNo}</td>
+                            <td className="p-2">{rep.date || formatDate(rep.createdAt)}</td>
+                            <td className="p-2 font-semibold">{rep.customerName || "—"}</td>
+                            <td className="p-2">{rep.contactPerson || "—"}</td>
+                            <td className="p-2"><span className="rounded bg-sky-500/10 px-2 py-0.5 text-sky-300">{rep.callStatus}</span></td>
+                            <td className="p-2 uppercase">{rep.engineerId || rep.submittedBy?.employeeid || "—"}</td>
+                            <td className="p-2 font-medium text-slate-200">{rep.engineerName || "—"}</td>
+                            <td className="pr-3 text-right">
+                              {hasPdf ? (
+                                <button
+                                  type="button"
+                                  onClick={() => viewReportPdf(rep)}
+                                  className="inline-flex items-center gap-1 rounded-lg  px-3 text-xs font-semibold text-cyan-300 hover: cursor-pointer"
                                 >
                                   📄 View PDF
-                                </a>
+                                </button>
                               ) : (
                                 <span className="text-slate-500 italic">PDF Unavailable</span>
                               )}
@@ -781,7 +799,7 @@ export default function AdminUsersPage() {
                 </div>
 
                 {/* Pagination Controls (10 items per page) */}
-                <div className="mt-6 flex items-center justify-between border-t border-white/10 pt-4 text-xs">
+                <div className="mt-2 flex items-center justify-between border-t border-white/10 pt-2 text-xs">
                   <span className="text-slate-400">
                     Showing Page <strong>{reportPagination.page}</strong> of <strong>{reportPagination.totalPages}</strong> (Total {reportPagination.total} reports)
                   </span>
@@ -791,7 +809,7 @@ export default function AdminUsersPage() {
                       type="button"
                       disabled={reportPage <= 1}
                       onClick={() => fetchReports(reportPage - 1)}
-                      className="rounded-lg border border-white/20 px-4 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="px-4 text-xs font-semibold text-white hover:cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       ← Previous
                     </button>
@@ -799,7 +817,7 @@ export default function AdminUsersPage() {
                       type="button"
                       disabled={reportPage >= reportPagination.totalPages}
                       onClick={() => fetchReports(reportPage + 1)}
-                      className="rounded-lg border border-white/20 px-4 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="rounded-lg px-4 text-xs font-semibold text-white hover:cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       Next →
                     </button>
@@ -869,7 +887,7 @@ export default function AdminUsersPage() {
       {/* Company Add/Edit Modal */}
       {showCompanyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#0b1b2b] p-6 shadow-2xl">
+          <div role="dialog" aria-modal="true" className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-[#0b1b2b] p-6 shadow-2xl">
             <h2 className="text-xl font-bold">{editingCompany ? "Edit Company Details" : "Add New Company"}</h2>
             <form onSubmit={saveCompany} className="mt-5 space-y-4">
               <label className="block text-sm">
@@ -877,23 +895,31 @@ export default function AdminUsersPage() {
                 <input required type="text" value={companyForm.name} onChange={(e) => setCompanyForm({ ...companyForm, name: e.target.value })} className="mt-1 w-full rounded-lg border border-white/20 bg-[#071421] px-3 py-2 text-white outline-none focus:border-[#00A0D2]" />
               </label>
               <label className="block text-sm">
-                Headquarters Address
+                Company Address
                 <textarea rows={2} value={companyForm.address} onChange={(e) => setCompanyForm({ ...companyForm, address: e.target.value })} className="mt-1 w-full rounded-lg border border-white/20 bg-[#071421] px-3 py-2 text-white outline-none focus:border-[#00A0D2]" />
               </label>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block text-sm">
-                  Primary Contact Person
-                  <input type="text" value={companyForm.contactPerson} onChange={(e) => setCompanyForm({ ...companyForm, contactPerson: e.target.value })} className="mt-1 w-full rounded-lg border border-white/20 bg-[#071421] px-3 py-2 text-white outline-none focus:border-[#00A0D2]" />
-                </label>
-                <label className="block text-sm">
-                  Mobile / Phone
-                  <input type="text" value={companyForm.mobile} onChange={(e) => setCompanyForm({ ...companyForm, mobile: e.target.value })} className="mt-1 w-full rounded-lg border border-white/20 bg-[#071421] px-3 py-2 text-white outline-none focus:border-[#00A0D2]" />
-                </label>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold">Contact Persons</span>
+                  <button type="button" onClick={() => setCompanyForm({ ...companyForm, contactPersons: [...companyForm.contactPersons, { name: "", mobile: "", email: "" }] })} className="text-xs font-semibold text-cyan-300 hover:underline">+ Add Contact Person</button>
+                </div>
+                {companyForm.contactPersons.map((contact, index) => (
+                  <div key={index} className="rounded-xl border border-white/10 bg-[#071421] p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-400">Contact {index + 1}</span>
+                      {companyForm.contactPersons.length > 1 && <button type="button" onClick={() => setCompanyForm({ ...companyForm, contactPersons: companyForm.contactPersons.filter((_, contactIndex) => contactIndex !== index) })} className="text-xs text-red-300 hover:underline">Remove</button>}
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {[["Contact Person Name", "name", "text"], ["Contact Number", "mobile", "tel"], ["Mail ID", "email", "email"]].map(([label, field, type]) => (
+                        <label key={field} className={`block text-sm ${field === "email" ? "sm:col-span-2" : ""}`}>
+                          {label}{field === "name" ? " *" : ""}
+                          <input required={field === "name"} type={type} value={contact[field]} onChange={(e) => setCompanyForm({ ...companyForm, contactPersons: companyForm.contactPersons.map((item, contactIndex) => contactIndex === index ? { ...item, [field]: e.target.value } : item) })} className="mt-1 w-full rounded-lg border border-white/20 bg-[#0b1b2b] px-3 py-2 text-white outline-none focus:border-[#00A0D2]" />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
-              <label className="block text-sm">
-                Email
-                <input type="email" value={companyForm.email} onChange={(e) => setCompanyForm({ ...companyForm, email: e.target.value })} className="mt-1 w-full rounded-lg border border-white/20 bg-[#071421] px-3 py-2 text-white outline-none focus:border-[#00A0D2]" />
-              </label>
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setShowCompanyModal(false)} className="rounded-lg border border-white/20 px-4 py-2 text-sm">Cancel</button>
                 <button type="submit" className="rounded-lg bg-[#00A0D2] px-5 py-2 text-sm font-semibold">{editingCompany ? "Update" : "Create"}</button>
@@ -903,61 +929,6 @@ export default function AdminUsersPage() {
         </div>
       )}
 
-      {/* Add Location Modal */}
-      {locationCompanyId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b1b2b] p-6 shadow-2xl">
-            <h2 className="text-xl font-bold">Add Plant / Branch Location</h2>
-            <form onSubmit={addLocationToCompany} className="mt-5 space-y-4">
-              <label className="block text-sm">
-                Location Name (e.g. Plant 2 - Hosur) *
-                <input required type="text" value={locationForm.locationName} onChange={(e) => setLocationForm({ ...locationForm, locationName: e.target.value })} className="mt-1 w-full rounded-lg border border-white/20 bg-[#071421] px-3 py-2 text-white outline-none focus:border-[#00A0D2]" />
-              </label>
-              <label className="block text-sm">
-                Address
-                <textarea rows={2} value={locationForm.address} onChange={(e) => setLocationForm({ ...locationForm, address: e.target.value })} className="mt-1 w-full rounded-lg border border-white/20 bg-[#071421] px-3 py-2 text-white outline-none focus:border-[#00A0D2]" />
-              </label>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setLocationCompanyId(null)} className="rounded-lg border border-white/20 px-4 py-2 text-sm">Cancel</button>
-                <button type="submit" className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold">Save Location</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Add Contact Person Modal */}
-      {contactLocationTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b1b2b] p-6 shadow-2xl">
-            <h2 className="text-xl font-bold">Add Contact Person to Location</h2>
-            <form onSubmit={addContactToLocation} className="mt-5 space-y-4">
-              <label className="block text-sm">
-                Contact Person Name *
-                <input required type="text" value={contactForm.name} onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })} className="mt-1 w-full rounded-lg border border-white/20 bg-[#071421] px-3 py-2 text-white outline-none focus:border-[#00A0D2]" />
-              </label>
-              <label className="block text-sm">
-                Designation / Role
-                <input type="text" value={contactForm.designation} onChange={(e) => setContactForm({ ...contactForm, designation: e.target.value })} placeholder="e.g. Plant Manager" className="mt-1 w-full rounded-lg border border-white/20 bg-[#071421] px-3 py-2 text-white outline-none focus:border-[#00A0D2]" />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block text-sm">
-                  Mobile
-                  <input type="text" value={contactForm.mobile} onChange={(e) => setContactForm({ ...contactForm, mobile: e.target.value })} className="mt-1 w-full rounded-lg border border-white/20 bg-[#071421] px-3 py-2 text-white outline-none focus:border-[#00A0D2]" />
-                </label>
-                <label className="block text-sm">
-                  Email
-                  <input type="email" value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })} className="mt-1 w-full rounded-lg border border-white/20 bg-[#071421] px-3 py-2 text-white outline-none focus:border-[#00A0D2]" />
-                </label>
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setContactLocationTarget(null)} className="rounded-lg border border-white/20 px-4 py-2 text-sm">Cancel</button>
-                <button type="submit" className="rounded-lg bg-cyan-600 px-5 py-2 text-sm font-semibold">Save Contact</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </main>
   );
 }

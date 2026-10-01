@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import icon from "../assets/logo.png";
+import icon_1 from "../assets/logo_1.png";
 import ChangePasswordModal from "./ChangePasswordModal";
 
 const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
@@ -15,7 +16,7 @@ export default function FieldServiceReport({ onSubmitReport }) {
   console.log(currentUser)
   const defaultEngineerName = currentUser?.name || currentUser?.username || currentUser?.email || "";
   const defaultEngineerEmail = currentUser?.email || "";
-  const defaultEngineerId = currentUser?.employeeid;
+  const defaultEngineerId = currentUser?.employeeid || currentUser?.employeeId || currentUser?.engineerId || "";
   const pdfPageRef = useRef(null);
 
   const initialForm = {
@@ -65,7 +66,6 @@ export default function FieldServiceReport({ onSubmitReport }) {
   const [nextFsrNo, setNextFsrNo] = useState("");
   const [companies, setCompanies] = useState([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
-  const [selectedLocationId, setSelectedLocationId] = useState("");
   const [selectedContactId, setSelectedContactId] = useState("");
 
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -84,7 +84,12 @@ export default function FieldServiceReport({ onSubmitReport }) {
 
         if (nextRes.nextFsrNo) {
           setNextFsrNo(nextRes.nextFsrNo);
-          setForm((prev) => ({ ...prev, fsrNo: nextRes.nextFsrNo }));
+          setForm((prev) => ({
+            ...prev,
+            fsrNo: nextRes.nextFsrNo,
+            engineerName: nextRes.engineerName || prev.engineerName,
+            engineerId: nextRes.engineerId || prev.engineerId || "",
+          }));
         }
 
         if (compRes.companies) {
@@ -100,7 +105,6 @@ export default function FieldServiceReport({ onSubmitReport }) {
   // Hierarchical Selectors logic
   function handleSelectCompany(companyId) {
     setSelectedCompanyId(companyId);
-    setSelectedLocationId("");
     setSelectedContactId("");
     if (!companyId) {
       setForm((prev) => ({ ...prev, companyId: "", customerName: "", locationName: "", customerAddress: "", contactPerson: "", mobile: "", customerEmail: "" }));
@@ -114,33 +118,35 @@ export default function FieldServiceReport({ onSubmitReport }) {
         companyId: comp._id || comp.id,
         customerName: comp.name || "",
         customerAddress: comp.address || "",
-        contactPerson: comp.contactPerson || "",
-        mobile: comp.mobile || "",
-        customerEmail: comp.email || "",
+        contactPerson: "",
+        mobile: "",
+        customerEmail: "",
         locationName: "",
       }));
     }
   }
 
-  function handleSelectLocation(locId) {
-    setSelectedLocationId(locId);
-    setSelectedContactId("");
-    if (!locId) {
-      setForm((prev) => ({ ...prev, locationName: "", contactPerson: "", mobile: "", customerEmail: "" }));
+  function handleCompanyNameChange(value) {
+    const matchingCompany = companies.find(
+      (company) => String(company.name || "").trim().toLowerCase() === value.trim().toLowerCase()
+    );
+
+    if (matchingCompany) {
+      handleSelectCompany(matchingCompany.id || matchingCompany._id);
       return;
     }
 
-    const comp = companies.find((c) => String(c.id || c._id) === String(selectedCompanyId));
-    if (comp && comp.locations) {
-      const loc = comp.locations.find((l) => String(l._id) === String(locId));
-      if (loc) {
-        setForm((prev) => ({
-          ...prev,
-          locationName: loc.locationName || "",
-          customerAddress: loc.address || prev.customerAddress,
-        }));
-      }
-    }
+    const hadSelectedCompany = Boolean(selectedCompanyId);
+    setSelectedCompanyId("");
+    setSelectedContactId("");
+    setForm((previous) => ({
+      ...previous,
+      companyId: "",
+      customerName: value,
+      ...(hadSelectedCompany
+        ? { customerAddress: "", locationName: "", contactPerson: "", mobile: "", customerEmail: "" }
+        : {}),
+    }));
   }
 
   function handleSelectContact(contactId) {
@@ -151,20 +157,39 @@ export default function FieldServiceReport({ onSubmitReport }) {
     }
 
     const comp = companies.find((c) => String(c.id || c._id) === String(selectedCompanyId));
-    if (comp && comp.locations) {
-      const loc = comp.locations.find((l) => String(l._id) === String(selectedLocationId));
-      if (loc && loc.contactPersons) {
-        const cp = loc.contactPersons.find((p) => String(p._id) === String(contactId));
-        if (cp) {
-          setForm((prev) => ({
-            ...prev,
-            contactPerson: cp.name || "",
-            mobile: cp.mobile || prev.mobile,
-            customerEmail: cp.email || prev.customerEmail,
-          }));
-        }
+    if (comp) {
+      const contacts = comp.contactPersons?.length
+        ? comp.contactPersons
+        : (comp.contactPerson ? [{ _id: "legacy", name: comp.contactPerson, mobile: comp.mobile, email: comp.email }] : []);
+      const cp = contacts.find((p) => String(p._id || p.id || "legacy") === String(contactId));
+      if (cp) {
+        setForm((prev) => ({
+          ...prev,
+          contactPerson: cp.name || "",
+          mobile: cp.mobile || "",
+          customerEmail: cp.email || "",
+        }));
       }
     }
+  }
+
+  function handleContactNameChange(value) {
+    const matchingContact = currentContacts.find(
+      (contact) => String(contact.name || "").trim().toLowerCase() === value.trim().toLowerCase()
+    );
+
+    if (matchingContact) {
+      handleSelectContact(matchingContact._id || matchingContact.id || "legacy");
+      return;
+    }
+
+    const hadSelectedContact = Boolean(selectedContactId);
+    setSelectedContactId("");
+    setForm((previous) => ({
+      ...previous,
+      contactPerson: value,
+      ...(hadSelectedContact ? { mobile: "", customerEmail: "" } : {}),
+    }));
   }
 
   function handleChange(event) {
@@ -230,11 +255,13 @@ export default function FieldServiceReport({ onSubmitReport }) {
 
       // Ensure engineer name from logged-in account is included
       const activeEngineerName = form.engineerName || defaultEngineerName;
+      const activeEngineerId = form.engineerId || defaultEngineerId;
 
       // 1. Submit report to backend (backend assigns official FSR number)
       const res = await onSubmitReport({
         ...form,
         engineerName: activeEngineerName,
+        engineerId: activeEngineerId,
         customerSignDate: form.date,
         engineerSignDate: form.date,
         customerSignature,
@@ -245,7 +272,12 @@ export default function FieldServiceReport({ onSubmitReport }) {
       const reportId = res?.report?._id || res?.report?.id || res?.reportId;
       if (!assignedFsrNo || !reportId) throw new Error("Backend did not return the saved report ID and FSR number.");
 
-      setForm((prev) => ({ ...prev, fsrNo: assignedFsrNo }));
+      setForm((prev) => ({
+        ...prev,
+        fsrNo: assignedFsrNo,
+        engineerName: res?.report?.engineerName || activeEngineerName,
+        engineerId: res?.report?.engineerId || activeEngineerId || "",
+      }));
 
       // Wait for React to put the assigned number into the dedicated A4 PDF page.
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -261,8 +293,10 @@ export default function FieldServiceReport({ onSubmitReport }) {
         const canvas = await html2canvas(pages[page], { scale: 1.5, useCORS: true, backgroundColor: "#fff" });
         if (page) pdf.addPage();
         pdf.addImage(canvas.toDataURL("image/jpeg", 0.86), "JPEG", 0, 0, pageWidth, pageHeight, undefined, "FAST");
-        pdf.setFontSize(8);
-        pdf.text(`Page ${page + 1} of ${pages.length}`, 198, 293, { align: "right" });
+        if (pages.length > 1) {
+          pdf.setFontSize(8);
+          pdf.text(`Page ${page + 1} of ${pages.length}`, 198, 293, { align: "right" });
+        }
       }
       const pdfBlob = pdf.output("blob");
       const pdfFormData = new FormData();
@@ -316,9 +350,9 @@ export default function FieldServiceReport({ onSubmitReport }) {
   } catch {}
 
   const currentCompany = companies.find((c) => String(c.id || c._id) === String(selectedCompanyId));
-  const currentLocations = currentCompany?.locations || [];
-  const currentLocation = currentLocations.find((l) => String(l._id) === String(selectedLocationId));
-  const currentContacts = currentLocation?.contactPersons || [];
+  const currentContacts = currentCompany?.contactPersons?.length
+    ? currentCompany.contactPersons
+    : (currentCompany?.contactPerson ? [{ _id: "legacy", name: currentCompany.contactPerson, mobile: currentCompany.mobile, email: currentCompany.email }] : []);
 
   const visitTypes = [
     { value: "chargeable", label: "CHARGEABLE" },
@@ -517,39 +551,11 @@ function SignaturePad({ label, value, onChange }) {
           {/* Customer and visit details */}
           <div className="report-columns grid lg:grid-cols-[1.55fr_1fr]">
             <div className="border-b border-slate-600 lg:border-r">
-              {companies.length > 0 && (
-                <div className="border-b border-slate-500 bg-sky-50/80 p-2 print-hide space-y-2">
+              <div className="hidden">
                   
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                  <div className="grid grid-cols-1 gap-2 text-xs">
                     <select
-                      value={selectedCompanyId}
-                      onChange={(e) => handleSelectCompany(e.target.value)}
-                      className="rounded border border-sky-300 bg-white p-1 text-xs outline-none"
-                    >
-                      <option value="">-- Select Company --</option>
-                      {companies.map((comp) => (
-                        <option key={comp.id || comp._id} value={comp.id || comp._id}>
-                          {comp.name}
-                        </option>
-                      ))}
-                    </select>
-
-                    <select
-                      disabled={!selectedCompanyId || currentLocations.length === 0}
-                      value={selectedLocationId}
-                      onChange={(e) => handleSelectLocation(e.target.value)}
-                      className="rounded border border-sky-300 bg-white p-1 text-xs outline-none disabled:opacity-50"
-                    >
-                      <option value="">-- Select Location --</option>
-                      {currentLocations.map((loc) => (
-                        <option key={loc._id} value={loc._id}>
-                          📍 {loc.locationName}
-                        </option>
-                      ))}
-                    </select>
-
-                    <select
-                      disabled={!selectedLocationId || currentContacts.length === 0}
+                      disabled={!selectedCompanyId || currentContacts.length === 0}
                       value={selectedContactId}
                       onChange={(e) => handleSelectContact(e.target.value)}
                       className="rounded border border-sky-300 bg-white p-1 text-xs outline-none disabled:opacity-50"
@@ -557,26 +563,31 @@ function SignaturePad({ label, value, onChange }) {
                       <option value="">-- Select Contact --</option>
                       {currentContacts.map((cp) => (
                         <option key={cp._id} value={cp._id}>
-                          👤 {cp.name} ({cp.designation || "Contact"})
+                          👤 {cp.name}{cp.designation ? ` (${cp.designation})` : ""}
                         </option>
                       ))}
                     </select>
                   </div>
                 </div>
-              )}
 
               <div className="border-b border-slate-500">
                 <div className="px-3 pt-2 text-xs font-bold">
                   CUSTOMER DETAILS:
                 </div>
-               <textarea
-                  name="customerAddress"
+                <input
+                  type="text"
+                  list="fsr-company-suggestions"
+                  name="customerName"
                   value={form.customerName}
-                  onChange={handleChange}
-                  placeholder="Customer address"
-                  rows={2}
-                  className="w-full resize-y px-3 py-1 text-sm outline-none placeholder:text-slate-400 focus:bg-sky-50"
+                  onChange={(e) => handleCompanyNameChange(e.target.value)}
+                  placeholder="Company name"
+                  className="w-full px-3 py-2 text-sm outline-none placeholder:text-slate-400 focus:bg-sky-50"
                 />
+                <datalist id="fsr-company-suggestions">
+                  {companies.map((comp) => (
+                    <option key={comp.id || comp._id} value={comp.name} />
+                  ))}
+                </datalist>
                 
                 {form.locationName && (
                   <p className="px-3 text-xs font-semibold text-sky-800">
@@ -596,7 +607,23 @@ function SignaturePad({ label, value, onChange }) {
               <div className="border-b border-slate-500">
                 <label className="flex min-w-0 items-center gap-2 px-2 py-1">
                   <span className={`${labelClass} shrink-0`}>Contact Person Name:</span>
-                  <input type="text" name="contactPerson" value={form.contactPerson} onChange={handleChange} className={inputClass} />
+                  <input
+                    type="text"
+                    list="fsr-contact-suggestions"
+                    name="contactPerson"
+                    value={form.contactPerson}
+                    onChange={(e) => handleContactNameChange(e.target.value)}
+                    className={inputClass}
+                  />
+                  <datalist id="fsr-contact-suggestions">
+                    {currentContacts.map((contact) => (
+                      <option
+                        key={contact._id || contact.id || contact.name}
+                        value={contact.name}
+                        label={contact.designation || undefined}
+                      />
+                    ))}
+                  </datalist>
                 </label>
               </div>
 
@@ -675,11 +702,11 @@ function SignaturePad({ label, value, onChange }) {
           ))}
 
           {/* Call Status & Spares */}
-          <div className="grid border-b border-slate-600 lg:grid-cols-[300px_1fr]">
+          <div className="grid border-b border-slate-600 lg:grid-cols-[500px_1fr]">
   <div className="border-b border-slate-500 px-3 py-2 lg:border-b-0 lg:border-r">
     <p className="mb-3 text-xs font-bold">CALL STATUS:</p>
 
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+    <div className="flex flex-wrap items-center gap-10 gap-y-2">
       {callStatuses.map((item) => (
         <label
           key={item.value}
@@ -731,7 +758,7 @@ function SignaturePad({ label, value, onChange }) {
 
           {/* Customer Feedback & Man Days */}
          <div className="border-b border-slate-600">
-  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-500 px-3 py-2">
+  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-500 px-3 py-3">
     <span className="text-xs font-bold">CUSTOMER FEEDBACK:</span>
 
     {feedbackOptions.map((opt) => (
@@ -804,7 +831,10 @@ function SignaturePad({ label, value, onChange }) {
               <textarea id="engineerRemarks" name="engineerRemarks" value={form.engineerRemarks} onChange={handleChange} className="w-full min-h-24 text-sm outline-none focus:bg-sky-50" />
               
               <SignaturePad label="Engineer Signature" value={engineerSignature} onChange={setEngineerSignature} />
-              <p className="mt-1 px-1 text-xs font-bold text-slate-700">{form.engineerName || defaultEngineerName} - {form.engineerId || defaultEngineerId}</p>
+              <p className="mt-1 px-1 text-xs font-bold text-slate-700">
+                Engineer Name: {form.engineerName || defaultEngineerName || "—"}
+                <span className="ml-3">ID: {form.engineerId || defaultEngineerId || "—"}</span>
+              </p>
               <p className="mt-1 px-1 text-xs font-bold text-slate-700"> </p>
             </div>
           </div>
@@ -843,7 +873,7 @@ const FsrPdfPage = forwardRef(function FsrPdfPage(
   const measureRef = useRef(null);
   const measureTableRef = useRef(null);
   const [useTwoPages, setUseTwoPages] = useState(false);
-  const cell = "border border-[#8b8b8b] px-[7px] py-[6px] items-center [overflow-wrap:anywhere]";
+  const cell = "border border-[#8b8b8b] px-[7px] py-[3px] align-middle [overflow-wrap:anywhere]";
   const label = "font-normal text-[#444]";
   const value = (text) => text === null || text === undefined || text === "" ? "—" : text;
   const detail = (title, text) => <><span className={label}>{title}: </span><span>{value(text)}</span></>;
@@ -875,18 +905,18 @@ const FsrPdfPage = forwardRef(function FsrPdfPage(
   };
   const workRow = (title, text, height) => (
     <tr>
-      <td colSpan={12} className={`${cell} !p-0`}>
-        <div className="flex items-stretch">
-          <div className="flex w-[28mm] shrink-0 items-center px-[5px] py-[4px] text-[#444]">{title}</div>
-          <div className={`${ruled} min-w-0 flex-1 px-[5px] py-[4px] text-left [overflow-wrap:anywhere] ${height}`}>{bulletText(text)}</div>
+      <td colSpan={12} className={`${cell} !p-0 !align-top`}>
+        <div className={`grid grid-cols-[28mm_minmax(0,1fr)] items-stretch ${height}`}>
+          <div className="flex h-full items-start px-[5px] py-[6px] text-[#444]">{title}</div>
+          <div className={`${ruled} flex h-full min-w-0 flex-col justify-start px-[5px] py-[6px] text-left [overflow-wrap:anywhere]`}>{bulletText(text)}</div>
         </div>
       </td>
     </tr>
   );
-  const signature = (name, date, image, customer) => (
+  const signature = (name, date, image, customer, engineerId = "") => (
     <div className="grid grid-cols-[1fr_32mm] items-center gap-[7px]">
       <div className="leading-[18px]">
-        <div>{detail("Name", name)}</div><div>{detail("Date", formatDate(date))}</div>
+        <div>{detail("Name", name)}{!customer && <span className="ml-[8px]">{detail("ID", engineerId)}</span>}</div><div>{detail("Date", formatDate(date))}</div>
       </div>
       <div className="text-center">
         <div className="flex h-[38px] items-end justify-center">{image && <img src={image} alt={customer ? "Customer signature" : "Engineer signature"} className="max-h-[38px] max-w-full object-contain" />}</div>
@@ -916,11 +946,11 @@ const FsrPdfPage = forwardRef(function FsrPdfPage(
 
   const headerRows = () => (
     <>
-      <tr className="h-4"><td colSpan={12} className={`${cell} text-center text-[12px] font-semibold`}>FIELD SERVICE REPORT</td></tr>
+      <tr className="h-4"><td colSpan={12} className={`${cell} text-center text-[13px] font-semibold pb-2`}>FIELD SERVICE REPORT</td></tr>
       <tr>
         <td colSpan={7} rowSpan={4} className={`${cell} align-middle`}>
           <div className="grid grid-cols-[40mm_minmax(0,1fr)] items-center gap-[10px]">
-            <div className="flex w-[40mm] items-center justify-center"><img src={icon} alt="Smartfix Automation" className="block max-h-[48px] max-w-[38mm] object-contain" /></div>
+            <div className="flex w-[40mm] items-center justify-center"><img src={icon_1} alt="Smartfix Automation" className="block max-h-[48px] max-w-[38mm] object-contain" /></div>
             <div className="min-w-0 text-left text-[12px] leading-[1.5]">
               <strong className="text-[12px] font-semibold">SMARTFIX AUTOMATION</strong>
               <div>No. 5/12, Chetty Street, Poonamallee,<br />Chennai, Tamil Nadu - 600056<br />Mail: csm@smartfixautomation.com<br />+91 9894571542</div>
@@ -932,40 +962,42 @@ const FsrPdfPage = forwardRef(function FsrPdfPage(
       </tr>
       <tr><td colSpan={2} className={cell}>{detail("Ref.No", form.refNo)}</td><td colSpan={3} className={cell}>{detail("Start Date", formatDate(form.startDate))}</td></tr>
       <tr><td colSpan={5} className={cell}>{detail("End Date", formatDate(form.endDate))}</td></tr>
-      <tr><td colSpan={5} className={cell}><div className="mb-[5px] pb-[3px] text-[12px] leading-[1.2]">Visit Type</div><div className="grid grid-cols-2 items-start gap-x-[10px] gap-y-[4px] font-semibold text-[12px]">{option(form.visitType === "chargeable", "Chargeable")}{option(form.visitType === "non-chargeable", "Non Chargeable")}</div></td></tr>
+      <tr><td colSpan={5} className={`${cell} !p-0`}><div className="flex min-h-[13mm] flex-col justify-between px-[7px] py-[4px]"><div className="text-[12px] leading-[1.2]">Visit Type</div><div className="grid grid-cols-2 items-start gap-x-[10px] gap-y-[4px] font-semibold text-[12px]">{option(form.visitType === "chargeable", "Chargeable")}{option(form.visitType === "non-chargeable", "Non Chargeable")}</div></div></td></tr>
     </>
   );
 
   const primaryRows = (expanded = false) => (
     <>
-      <tr>
-        <td colSpan={7} className={cell}>
-          <span className="">Customer Details: </span><span className="text-[12px] font-bold">{value(form.customerName)}</span>
-          <div>{value(form.customerAddress)}</div>
-          <div className="mt-[3px]">{detail("LOCATION", form.locationName)}</div>
+      <tr className="h-px">
+        <td colSpan={7} className={`${cell} !py-[2px]`}>
+          <span className="text-[13px] font-bold">{value(form.customerName)}</span>
+          <div className="mt-[1px]">{value(form.customerAddress)}</div>
+          <div className="mt-[3px]">{detail("Contact Name", form.contactPerson)}</div><div>{detail("Mobile", form.mobile)}<span className="ml-[12px]">{detail("EMAIL", form.customerEmail)}</span></div>
         </td>
-        <td colSpan={5} rowSpan={2} className={`${cell} justify-between`}>
-          <div className="mb-[5px] pb-[3px] text-[12px] leading-[1.2]">Category</div>
-          <div className="grid grid-cols-2 items-center gap-x-[10px] gap-y-[6px] font-semibold  text-[12px]">
-            {[["service", "Service"], ["emc", "Emc"], ["project", "Project"], ["warranty", "Warranty"], ["demo-training", "Demo/Training"], ["system-study", "System Study"]].map(([key, title]) => <span key={key}>{option(form.category === key, title)}</span>)}
+        <td colSpan={5} className={`${cell} !p-0`}>
+          <div className="flex min-h-[28mm] flex-col justify-between px-[7px] py-[4px]">
+            <div className="text-[12px] leading-[1.2]">Category</div>
+            <div className="grid grid-cols-2 items-center gap-x-[10px] gap-y-[6px] font-semibold text-[12px]">
+              {[["service", "Service"], ["emc", "Emc"], ["project", "Project"], ["warranty", "Warranty"], ["demo-training", "Demo/Training"], ["system-study", "System Study"]].map(([key, title]) => <span key={key}>{option(form.category === key, title)}</span>)}
+            </div>
           </div>
         </td>
       </tr>
-      <tr><td colSpan={7} className={cell}><div>{detail("Contact Person Name", form.contactPerson)}</div><div>{detail("Mobile", form.mobile)}<span className="ml-[12px]">{detail("EMAIL", form.customerEmail)}</span></div></td></tr>
-      {workRow("Customer Issue:", form.customerIssue, expanded ? "h-[40mm] overflow-hidden" : "min-h-[22mm]")}
+
+      {workRow("Customer Issue:", form.customerIssue, expanded ? "h-[25mm] overflow-hidden" : "min-h-[18mm]")}
       {workRow("Action:", form.action, "min-h-[50mm]")}
     </>
   );
 
   const statusRows = () => (
     <>
-      <tr><td colSpan={12} className={cell}><div className="grid grid-cols-[20mm_repeat(3,minmax(0,1fr))] items-center justify-items-start gap-x-[2px] gap-y-[2px]"><span>Call Status:</span>{option(form.callStatus === "completed", "Completed")}{option(form.callStatus === "pending", "Pending")}{option(form.callStatus === "spare-required", "Spare Required")}</div></td></tr>
-      <tr><td colSpan={12} className={cell}>{detail("Spare Details", form.spareDetails)}</td></tr>
+      <tr ><td colSpan={12} className={cell}><div className="grid grid-cols-[20mm_repeat(3,minmax(0,1fr))] items-center justify-items-start gap-x-[2px] py-[4px]"><span>Call Status:</span>{option(form.callStatus === "completed", "Completed")}{option(form.callStatus === "pending", "Pending")}{option(form.callStatus === "spare-required", "Spare Required")}</div></td></tr>
+      <tr ><td colSpan={12} className={cell}><span className="py-[4px]">{detail("Spare Details", form.spareDetails)}</span></td></tr>
       <tr>
         <td colSpan={12} className={cell}>
-          <div className="grid grid-cols-[28mm_repeat(3,minmax(0,1fr))] items-center justify-items-start gap-x-[10px]">
-            <span>Customer Feedback:</span>
-            {["Extremely Satisfied", "Satisfied", "Dissatisfied"].map((title) => <span key={title}>{option(form.customerFeedback === title, title)}</span>)}
+          <div className="grid grid-cols-[35mm_repeat(3,minmax(0,1fr))] items-center justify-items-start gap-x-[6px] py-[4px]">
+            <span className="whitespace-nowrap">Customer Feedback:</span>
+            {["Extremely Satisfied", "Satisfied", "Dissatisfied"].map((title) => <span key={title} className="whitespace-nowrap">{option(form.customerFeedback === title, title)}</span>)}
           </div>
         </td>
       </tr>
@@ -976,30 +1008,30 @@ const FsrPdfPage = forwardRef(function FsrPdfPage(
     <>
       <tr>
         <td colSpan={12} className={`${cell} !p-0`}>
-          <table className="w-full table-fixed border-collapse text-[12px] leading-[1.45]">
+          <table className="h-full w-full table-fixed border-collapse text-[12px] leading-[1.45] [&_tbody]:h-full">
             <colgroup><col className="w-[19mm]" />{Array.from({ length: 6 }, (_, i) => <col key={i} />)}</colgroup>
             <tbody>
               <tr>
-                <td rowSpan={2} className="border-r border-[#8b8b8b] px-[6px] py-[6px] align-middle text-center">Billing Details</td>
-                {["No. of Persons", "Total No. of Working Days", "Over Time (Hrs)", "Extra MAN Days (Over Time)", "Total No. of MAN Days", "Total No. of Payable Days"].map((title, i) => <td key={title} className={`border-b border-[#8b8b8b] px-[6px] py-[6px] align-middle [overflow-wrap:anywhere] ${i < 5 ? "border-r" : ""}`}>{title}</td>)}
+                <td rowSpan={2} className="border-r border-[#8b8b8b] px-[6px] py-[5px] align-middle text-center">Billing Details</td>
+                {["No. of Persons", "Total No. of Working Days", "Over Time (Hrs)", "Extra MAN Days (Over Time)", "Total No. of MAN Days", "Total No. of Payable Days"].map((title, i) => <td key={title} className={`border-b border-[#8b8b8b] px-[6px] py-[3px] align-middle [overflow-wrap:anywhere] ${i < 5 ? "border-r" : ""}`}>{title}</td>)}
               </tr>
               <tr>
-                {[form.persons, form.workingDays, form.overtimeHours, form.extraManDays, form.totalManDays, form.payableDays].map((text, i) => <td key={i} className={`h-[8mm] border-[#8b8b8b] px-[6px] py-[6px] align-middle [overflow-wrap:anywhere] ${i < 5 ? "border-r" : ""}`}>{value(text)}</td>)}
+                {[form.persons, form.workingDays, form.overtimeHours, form.extraManDays, form.totalManDays, form.payableDays].map((text, i) => <td key={i} className={`h-[8mm] border-[#8b8b8b] px-[6px] py-[6px] align-middle text-center [overflow-wrap:anywhere] ${i < 5 ? "border-r" : ""}`}>{value(text)}</td>)}
               </tr>
             </tbody>
           </table>
         </td>
       </tr>
       <tr>
-        <td colSpan={6} className={`${cell} !p-0`}><div className="px-[7px] pt-[6px] pb-[3px] underline">Customer Remarks:</div><div className={`${ruled} flex min-h-[22mm] items-center px-[7px] py-[6px] text-left [overflow-wrap:anywhere]`}>{value(form.customerRemarks)}</div><div className="px-[7px] pt-[5px] pb-[6px]">{signature(form.customerSignName, form.date, customerSignature, true)}</div></td>
-        <td colSpan={6} className={`${cell} !p-0`}><div className="px-[7px] pt-[6px] pb-[3px] underline">Engineer&apos;s Remarks:</div><div className={`${ruled} flex min-h-[22mm] items-center px-[7px] py-[6px] text-left [overflow-wrap:anywhere]`}>{value(form.engineerRemarks)}</div><div className="px-[7px] pt-[5px] pb-[6px]">{signature(form.engineerName, form.date, engineerSignature, false)}</div></td>
+        <td colSpan={6} className={`${cell} !p-0 !align-top`}><div className="flex h-full flex-col"><div className="px-[7px] !pt-0 pb-[3px] underline">Customer Remarks:</div><div className={`${ruled} flex min-h-[20mm] items-center px-[7px] py-[6px] text-left [overflow-wrap:anywhere]`}>{value(form.customerRemarks)}</div><div className="mt-auto px-[7px] pt-[5px] pb-[10px]">{signature(form.customerSignName, form.date, customerSignature, true)}</div></div></td>
+        <td colSpan={6} className={`${cell} !p-0 !align-top`}><div className="flex h-full flex-col"><div className="px-[7px] !pt-0 pb-[3px] underline">Engineer&apos;s Remarks:</div><div className={`${ruled} flex min-h-[20mm] items-center px-[7px] py-[6px] text-left [overflow-wrap:anywhere]`}>{value(form.engineerRemarks)}</div><div className="mt-auto px-[7px] pt-[5px] pb-[10px]">{signature(form.engineerName, form.date, engineerSignature, false, form.engineerId)}</div></div></td>
       </tr>
     </>
   );
 
   const page = (rows, key) => (
-    <div key={key} data-pdf-page className="box-border h-[297mm] w-[210mm] shrink-0 overflow-hidden bg-white p-[10mm] text-[12px] leading-[1.45] text-[#333] [font-family:Arial,sans-serif]">
-      <table className={`w-full table-fixed border-collapse text-[12px] leading-[1.45] ${key !== "continuation" ? "h-full" : ""}`}>
+    <div key={key} data-pdf-page className="box-border h-[297mm] w-[210mm] shrink-0 overflow-hidden bg-white p-[11mm] text-[12px] leading-[1.45] text-[#333] [font-family:Arial,sans-serif]">
+      <table className={`w-full table-fixed border-collapse text-[12px] leading-[1.45] [&_td]:align-middle ${key !== "continuation" ? "h-full" : ""}`}>
         {columns()}
         <tbody>{rows}</tbody>
       </table>
@@ -1013,7 +1045,7 @@ const FsrPdfPage = forwardRef(function FsrPdfPage(
         : page(<>{headerRows()}{primaryRows()}{statusRows()}{billingRows()}</>, "single")}
 
       <div ref={measureRef} aria-hidden="true" className="invisible absolute left-0 top-0 box-border h-[297mm] w-[210mm] overflow-hidden bg-white p-[10mm] text-[12px] leading-[1.45] [font-family:Arial,sans-serif]">
-        <table ref={measureTableRef} className="h-full w-full table-fixed border-collapse text-[12px] leading-[1.45]">
+        <table ref={measureTableRef} className="h-full w-full table-fixed border-collapse text-[12px] leading-[1.45] [&_td]:align-middle">
           {columns()}
           <tbody>{headerRows()}{primaryRows()}{statusRows()}{billingRows()}</tbody>
         </table>
@@ -1021,5 +1053,3 @@ const FsrPdfPage = forwardRef(function FsrPdfPage(
     </div>
   );
 });
-
-
